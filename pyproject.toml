@@ -1,0 +1,21 @@
+[project]
+name = "quantbench"
+version = "0.1.0"
+description = "Phase 0 CLI prototype for reproducible quantitative research runs."
+requires-python = ">=3.10"
+dependencies = [
+  "click",
+  "litellm",
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "pyarrow",
+  "pyyaml",
+  "yfinance",
+]
+
+[project.optional-dependencies]
+live = ["ccxt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
