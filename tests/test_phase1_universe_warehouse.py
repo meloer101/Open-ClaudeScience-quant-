@@ -23,6 +23,28 @@ def test_build_sp500_universe_marks_survivorship_bias(monkeypatch):
     assert "survivorship bias" in result.survivorship_bias_note
 
 
+def test_build_sp500_universe_limit_truncates_and_flags_non_representative(monkeypatch):
+    from quantbench.data import universe
+
+    monkeypatch.setattr(
+        universe,
+        "fetch_current_constituents",
+        lambda: pd.DataFrame(
+            {
+                "Symbol": [f"SYM{i:03d}" for i in range(500)],
+                "Security": [f"Company {i}" for i in range(500)],
+            }
+        ),
+    )
+
+    result = universe.build_sp500_universe("2026-07-01", limit=10)
+
+    assert len(result.symbols) == 10
+    assert result.symbols == sorted(f"SYM{i:03d}" for i in range(500))[:10]
+    assert result.sample_limit == 10
+    assert "NOT representative" in result.survivorship_bias_note
+
+
 def test_warehouse_upsert_replaces_symbol_timestamp_rows(tmp_path):
     from quantbench.data.warehouse import get_connection, query_universe_ohlcv, upsert_ohlcv
 

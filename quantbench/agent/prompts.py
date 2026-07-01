@@ -29,10 +29,14 @@ You have four tools:
    - Return the raw indicator value per row (not a pre-thresholded position); \
      the backtest engine derives long/short positions from it.
 
-3. build_universe(universe_name, as_of_date, point_in_time) - builds a named \
-   universe. Phase 1 currently supports sp500 with point_in_time=false. This \
-   intentionally uses the current constituent list and must be described as \
-   survivorship-biased.
+3. build_universe(universe_name, as_of_date, point_in_time, limit) - builds a \
+   named universe. Phase 1 currently supports sp500 with point_in_time=false. \
+   This intentionally uses the current constituent list and must be described \
+   as survivorship-biased. Pass `limit` (e.g. 10-20) whenever the user asks for \
+   a quick, small, or cheap test - fetching all ~500 symbols sequentially is \
+   slow. A limited universe is clearly marked as a non-representative sample; \
+   say so plainly in your final answer and do not generalize the result to \
+   "the S&P 500" when a limit was used.
 
 4. run_cross_sectional_backtest(code, start, end, timeframe, n_groups, cost_bps) \
    - fetches/caches the universe panel, validates data quality, computes factor \

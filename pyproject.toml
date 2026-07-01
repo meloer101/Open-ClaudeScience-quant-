@@ -6,12 +6,17 @@ requires-python = ">=3.10"
 dependencies = [
   "click",
   "duckdb",
+  "fastapi",
   "litellm",
+  "lxml",
   "matplotlib",
   "numpy",
   "pandas",
   "pyarrow",
   "pyyaml",
+  "requests",
+  "scipy",
+  "uvicorn",
   "yfinance",
 ]
 

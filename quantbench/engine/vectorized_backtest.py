@@ -8,7 +8,7 @@ from quantbench.engine.metrics import (
     annualized_sharpe,
     compute_drawdown,
     information_coefficient,
-    periods_per_year,
+    periods_per_year_from_timestamps,
 )
 
 
@@ -37,10 +37,7 @@ def run_vectorized_backtest(price_df: pd.DataFrame, signal: pd.Series, cost_bps:
     df = price_df.reset_index(drop=True).copy()
     signal = signal.reset_index(drop=True)
     timestamps = pd.to_datetime(df["timestamp"], utc=True)
-    if len(timestamps) > 1:
-        ppy = float(periods_per_year(timestamps.diff().dropna().median()))
-    else:
-        ppy = 365 * 6
+    ppy = periods_per_year_from_timestamps(timestamps)
 
     forward_returns = df["close"].pct_change().shift(-1)
     position = _derive_position(signal)

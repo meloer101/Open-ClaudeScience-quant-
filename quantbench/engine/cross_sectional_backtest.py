@@ -6,7 +6,13 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from quantbench.engine.metrics import annualized_return, annualized_sharpe, compute_drawdown, monotonicity_score
+from quantbench.engine.metrics import (
+    annualized_return,
+    annualized_sharpe,
+    compute_drawdown,
+    monotonicity_score,
+    periods_per_year_from_timestamps,
+)
 
 
 @dataclass
@@ -92,7 +98,7 @@ def run_cross_sectional_backtest(
     drawdown = compute_drawdown(equity_curve)
     ic_series = _cross_sectional_ic(factor_panel, method="spearman")
     pearson_ic_series = _cross_sectional_ic(factor_panel, method="pearson")
-    ppy = _periods_per_year_from_index(net_returns.index)
+    ppy = periods_per_year_from_timestamps(net_returns.index)
     avg_group_returns = group_returns.mean()
 
     metrics = {
@@ -162,11 +168,3 @@ def _cross_sectional_ic(factor_panel: pd.DataFrame, method: str) -> pd.Series:
     return pd.Series(values).sort_index()
 
 
-def _periods_per_year_from_index(index: pd.Index) -> float:
-    if len(index) < 2:
-        return 252.0
-    timestamps = pd.to_datetime(index, utc=True)
-    median_delta = pd.Series(timestamps).diff().dropna().median()
-    if pd.isna(median_delta) or median_delta <= pd.Timedelta(0):
-        return 252.0
-    return float(pd.Timedelta(days=365) / median_delta)

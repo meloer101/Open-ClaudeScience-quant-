@@ -2,10 +2,31 @@ import numpy as np
 import pandas as pd
 
 
-def periods_per_year(time_delta: pd.Timedelta) -> float:
-    if time_delta <= pd.Timedelta(0):
-        return 365 * 6
-    return pd.Timedelta(days=365) / time_delta
+DEFAULT_PERIODS_PER_YEAR = 252.0
+
+
+def periods_per_year_from_timestamps(timestamps) -> float:
+    """Infer the annualization factor from how densely bars actually occur.
+
+    Using the *median gap between bars* looks right but silently breaks for
+    market-hours-only assets: weekends make the calendar span between two
+    consecutive equity bars look "the same" as a crypto bar's calendar span,
+    even though far fewer bars occur per year (252 trading days vs 365
+    calendar days) - inflating Sharpe by ~sqrt(365/252) ≈ 1.20x. Counting
+    actual observed bars per unit of calendar time sidesteps this: it comes
+    out to ~252/yr for equities daily bars and ~2190/yr for 4h crypto bars
+    without needing to special-case the asset class.
+    """
+    ts = pd.to_datetime(pd.Index(timestamps), utc=True).dropna().unique()
+    ts = pd.Index(ts).sort_values()
+    if len(ts) < 2:
+        return DEFAULT_PERIODS_PER_YEAR
+    span_days = (ts[-1] - ts[0]) / pd.Timedelta(days=1)
+    if span_days <= 0:
+        return DEFAULT_PERIODS_PER_YEAR
+    bars_per_day = (len(ts) - 1) / span_days
+    ppy = bars_per_day * 365.25
+    return float(ppy) if ppy > 0 else DEFAULT_PERIODS_PER_YEAR
 
 
 def annualized_sharpe(returns: pd.Series, periods: float) -> float:

@@ -23,7 +23,12 @@ class ArtifactStore:
         run_id = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
         run_dir = self.runs_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=False)
-        return Run(run_id=run_id, run_dir=run_dir, user_request=user_request, created_at=now)
+        run = Run(run_id=run_id, run_dir=run_dir, user_request=user_request, created_at=now)
+        # Written immediately (not just at finalize()) so callers - notably the
+        # web API - can show the request text while a run is still in progress,
+        # before config.yaml/manifest.json exist.
+        run.save_text("request.txt", user_request)
+        return run
 
 
 class Run:
@@ -66,6 +71,8 @@ class Run:
         warnings: list[str] | None = None,
         model: str = "unknown",
         conversation_log: str | None = None,
+        summary: str = "",
+        metrics: dict[str, Any] | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -73,6 +80,8 @@ class Run:
             "created_at": self.created_at.isoformat(),
             "duration_seconds": round(time.perf_counter() - self._started, 3),
             "model": model,
+            "summary": summary,
+            "metrics": metrics or {},
             "data_hash": data_hash,
             "code_hash": code_hash,
             "warnings": warnings or [],

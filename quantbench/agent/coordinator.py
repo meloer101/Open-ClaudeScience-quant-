@@ -79,8 +79,24 @@ if __name__ == "__main__":
 
     with _suppress_native_stderr():
         _df = pd.read_parquet(args.data_path)
-    _out = _df[["timestamp"]].copy()
-    _out["signal"] = compute(_df)
+
+    if "symbol" in _df.columns:
+        # Multi-symbol panel (Phase 1 cross-sectional runs). compute() must be
+        # applied per symbol, in the exact same shape run_cross_sectional_backtest
+        # uses internally - never across the mixed long table directly, or the
+        # reproduced numbers will silently diverge from the real backtest.
+        _frames = []
+        for _symbol, _symbol_df in _df.groupby("symbol", sort=False):
+            _symbol_df = _symbol_df.sort_values("timestamp").reset_index(drop=True)
+            _out_symbol = _symbol_df[["timestamp"]].copy()
+            _out_symbol["symbol"] = _symbol
+            _out_symbol["signal"] = compute(_symbol_df)
+            _frames.append(_out_symbol)
+        _out = pd.concat(_frames, ignore_index=True).sort_values(["timestamp", "symbol"])
+    else:
+        _out = _df[["timestamp"]].copy()
+        _out["signal"] = compute(_df)
+
     _csv = _out.to_csv(index=False)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as handle:
@@ -116,6 +132,15 @@ BUILD_UNIVERSE_PARAMS = {
         "point_in_time": {
             "type": "boolean",
             "description": "Phase 1 v1 only supports false. True raises an explicit not-implemented error.",
+        },
+        "limit": {
+            "type": "integer",
+            "description": (
+                "Optional: truncate to the first N tickers (alphabetically) instead of the "
+                "full ~500. Use this whenever the user asks for a quick/small/cheap test - "
+                "fetching all 500 symbols sequentially is slow and not needed to sanity-check "
+                "a factor idea. The universe is clearly marked as a non-representative sample."
+            ),
         },
     },
     "required": ["universe_name", "as_of_date"],
@@ -203,8 +228,10 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
 
         return {**backtest.metrics, "warnings": new_warnings}
 
-    def _build_universe(universe_name: str, as_of_date: str, point_in_time: bool = False) -> dict:
-        universe = build_universe(universe_name, as_of_date, point_in_time=point_in_time)
+    def _build_universe(
+        universe_name: str, as_of_date: str, point_in_time: bool = False, limit: int | None = None
+    ) -> dict:
+        universe = build_universe(universe_name, as_of_date, point_in_time=point_in_time, limit=limit)
         ctx.universe = universe
         run.save_text("universe.yaml", __import__("yaml").safe_dump(universe.to_dict(), sort_keys=False, allow_unicode=True))
         ctx.warnings.append(universe.survivorship_bias_note)
@@ -213,6 +240,7 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
             "as_of_date": universe.as_of_date,
             "symbols": len(universe.symbols),
             "point_in_time": universe.point_in_time,
+            "sample_limit": universe.sample_limit,
             "survivorship_bias_note": universe.survivorship_bias_note,
             "source": universe.source,
         }
@@ -328,6 +356,16 @@ class Coordinator:
 
     def run(self, user_request: str) -> RunResult:
         run = self.run_store.create_run(user_request)
+        return self.execute(run, user_request)
+
+    def execute(self, run, user_request: str) -> RunResult:
+        """Drive the tool-use loop for an already-created Run.
+
+        Split out from `run()` so callers that need the run_id before execution
+        finishes (e.g. the web API, which returns run_id immediately and runs
+        the loop in a background thread) can call `run_store.create_run(...)`
+        themselves first, then hand the Run object here.
+        """
         ctx = _RunContext()
         registry = _build_registry(ctx, run)
 
@@ -366,17 +404,24 @@ class Coordinator:
             summary = "Reached the step limit before the model produced a final answer."
             ctx.warnings.append("Coordinator hit MAX_STEPS without a final natural-language answer.")
 
+        panel_path = run.run_dir / "panel.parquet"
+        if ctx.cross_sectional and panel_path.exists():
+            reproduce_data_path: str | None = str(panel_path)
+        elif ctx.data_path:
+            reproduce_data_path = str(ctx.data_path)
+        else:
+            reproduce_data_path = None
+
         config = {
             "hypothesis": user_request,
             "model": self.model,
-            "data_path": str(ctx.data_path) if ctx.data_path else None,
+            "data_path": reproduce_data_path,
             "cache": ctx.cache_meta,
             "universe": ctx.universe.to_dict() if ctx.universe else None,
         }
         run.save_config(config)
 
         metrics = ctx.last_metrics or {}
-        panel_path = run.run_dir / "panel.parquet"
         if ctx.data_path:
             data_hash = f"sha256:{file_sha256(ctx.data_path)}"
         elif panel_path.exists():
@@ -406,6 +451,8 @@ class Coordinator:
             warnings=ctx.warnings,
             model=self.model,
             conversation_log="conversation.json",
+            summary=summary,
+            metrics=metrics,
         )
 
         return RunResult(

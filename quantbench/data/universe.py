@@ -16,6 +16,14 @@ SURVIVORSHIP_BIAS_NOTE = (
 )
 
 
+LIMITED_SAMPLE_NOTE_TEMPLATE = (
+    "This universe was truncated to a {limit}-symbol sample of the full S&P 500 "
+    "(alphabetically first {limit} tickers), for a quick/cheap test run. It is "
+    "NOT representative of the full index and results must not be interpreted "
+    "as an S&P 500-wide finding."
+)
+
+
 @dataclass(frozen=True)
 class UniverseDefinition:
     name: str
@@ -24,6 +32,7 @@ class UniverseDefinition:
     point_in_time: bool
     survivorship_bias_note: str
     source: str
+    sample_limit: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -33,7 +42,9 @@ class UniverseDefinition:
         return path
 
 
-def build_sp500_universe(as_of_date: str, point_in_time: bool = False) -> UniverseDefinition:
+def build_sp500_universe(
+    as_of_date: str, point_in_time: bool = False, limit: int | None = None
+) -> UniverseDefinition:
     if point_in_time:
         raise NotImplementedError("Point-in-time S&P 500 membership is not implemented in Phase 1 v1")
 
@@ -42,18 +53,28 @@ def build_sp500_universe(as_of_date: str, point_in_time: bool = False) -> Univer
     if len(symbols) < 400:
         raise ValueError(f"S&P 500 constituent parse returned too few symbols: {len(symbols)}")
 
+    note = SURVIVORSHIP_BIAS_NOTE
+    if limit is not None:
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        symbols = symbols[:limit]
+        note = f"{SURVIVORSHIP_BIAS_NOTE} {LIMITED_SAMPLE_NOTE_TEMPLATE.format(limit=limit)}"
+
     return UniverseDefinition(
         name="sp500",
         as_of_date=as_of_date,
         symbols=symbols,
         point_in_time=False,
-        survivorship_bias_note=SURVIVORSHIP_BIAS_NOTE,
+        survivorship_bias_note=note,
         source=WIKIPEDIA_SP500_URL,
+        sample_limit=limit,
     )
 
 
-def build_universe(name: str, as_of_date: str, point_in_time: bool = False) -> UniverseDefinition:
+def build_universe(
+    name: str, as_of_date: str, point_in_time: bool = False, limit: int | None = None
+) -> UniverseDefinition:
     normalized = name.lower().replace("-", "").replace("_", "")
     if normalized in {"sp500", "s&p500", "sandp500"}:
-        return build_sp500_universe(as_of_date=as_of_date, point_in_time=point_in_time)
+        return build_sp500_universe(as_of_date=as_of_date, point_in_time=point_in_time, limit=limit)
     raise ValueError(f"Unsupported universe: {name}")

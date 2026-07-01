@@ -98,7 +98,7 @@ def build_cross_sectional_research_note(
 **Hypothesis:** {config.get("hypothesis", "")}
 
 ## Universe
-- 名称: {universe.get("name", "unknown")}
+- 名称: {universe.get("name", "unknown")}{" (LIMITED SAMPLE, size=" + str(universe.get("sample_limit")) + ")" if universe.get("sample_limit") else ""}
 - as_of_date: {universe.get("as_of_date", "unknown")}
 - point_in_time: {universe.get("point_in_time", "unknown")}
 - 成分股数量: {len(universe.get("symbols", []))}
