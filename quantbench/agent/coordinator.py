@@ -136,7 +136,10 @@ RUN_SIGNAL_BACKTEST_PARAMS = {
 BUILD_UNIVERSE_PARAMS = {
     "type": "object",
     "properties": {
-        "universe_name": {"type": "string", "description": "Universe name, currently sp500."},
+        "universe_name": {
+            "type": "string",
+            "description": "Universe name, e.g. sp500 or top_usdt_perpetual for crypto perpetual swaps.",
+        },
         "as_of_date": {"type": "string", "description": "YYYY-MM-DD date for the universe definition."},
         "point_in_time": {
             "type": "boolean",
@@ -173,6 +176,13 @@ RUN_CROSS_SECTIONAL_BACKTEST_PARAMS = {
     },
     "required": ["code", "start", "end"],
 }
+
+
+CRYPTO_PERPETUAL_FUNDING_WARNING = (
+    "Crypto perpetual backtests do not model funding rate carry cost. Long-short "
+    "positions held across funding intervals may have systematically biased PnL "
+    "that this backtest does not capture."
+)
 
 
 class _RunContext:
@@ -235,7 +245,9 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
         save_drawdown_plot(backtest.drawdown, run.run_dir / "drawdown.png")
 
-        new_warnings = sanity_check_metrics(backtest.metrics)
+        new_warnings = _append_crypto_perpetual_warning(ctx) if _is_crypto_symbol(ctx.fetch_params) else []
+        new_warnings.extend(sanity_check_metrics(backtest.metrics))
+        benchmark_symbol = _benchmark_symbol_from_fetch_params(ctx.fetch_params)
         review_report = run_review(
             code=code,
             returns=backtest.returns,
@@ -245,6 +257,7 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
             out_of_sample_data=ctx.data_df,
             run_on_data=lambda data: _rerun_single_with_code(code, data, cost_bps) or {},
             benchmark_returns=_fetch_benchmark_returns(ctx.fetch_params, ctx.data_df),
+            benchmark_symbol=benchmark_symbol,
             turnover_annual=backtest.metrics.get("turnover_annual"),
         )
         ctx.review_report = review_report
@@ -268,6 +281,7 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
             "symbols": len(universe.symbols),
             "point_in_time": universe.point_in_time,
             "sample_limit": universe.sample_limit,
+            "asset_class": universe.asset_class,
             "survivorship_bias_note": universe.survivorship_bias_note,
             "source": universe.source,
         }
@@ -324,7 +338,9 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
         save_group_returns_plot(backtest.group_returns, run.run_dir / "group_returns.png")
         save_ic_plot(backtest.ic_series, run.run_dir / "rank_ic.png")
 
-        new_warnings = sanity_check_metrics(backtest.metrics)
+        new_warnings = _append_crypto_perpetual_warning(ctx) if _is_crypto_universe(ctx.universe) else []
+        new_warnings.extend(sanity_check_metrics(backtest.metrics))
+        benchmark_symbol = _benchmark_symbol_for_asset(ctx.universe.asset_class)
         review_report = run_review(
             code=code,
             returns=backtest.returns,
@@ -333,7 +349,10 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
             rerun_with_code=lambda candidate: _rerun_cross_with_code(candidate, panel, n_groups, cost_bps),
             out_of_sample_data=panel,
             run_on_data=lambda data: _rerun_cross_with_code(code, data, n_groups, cost_bps) or {},
-            benchmark_returns=_fetch_benchmark_returns({"symbol": "SPY", "timeframe": timeframe, "start": start, "end": end}, None),
+            benchmark_returns=_fetch_benchmark_returns(
+                {"symbol": benchmark_symbol, "timeframe": timeframe, "start": start, "end": end}, None
+            ),
+            benchmark_symbol=benchmark_symbol,
             factor_panel=backtest.factor_panel,
             n_groups=n_groups,
             turnover_annual=backtest.metrics.get("turnover_annual"),
@@ -819,6 +838,31 @@ def _fetch_benchmark_returns(fetch_params: dict[str, str] | None, current_df) ->
         return returns
     except Exception:
         return None
+
+
+def _benchmark_symbol_from_fetch_params(fetch_params: dict[str, str] | None) -> str | None:
+    if not fetch_params:
+        return None
+    return "BTC/USDT" if "/" in fetch_params.get("symbol", "") else "SPY"
+
+
+def _benchmark_symbol_for_asset(asset_class: str) -> str:
+    return "BTC/USDT" if asset_class == "crypto" else "SPY"
+
+
+def _is_crypto_symbol(fetch_params: dict[str, str] | None) -> bool:
+    return bool(fetch_params and "/" in fetch_params.get("symbol", ""))
+
+
+def _is_crypto_universe(universe: UniverseDefinition | None) -> bool:
+    return bool(universe and universe.asset_class == "crypto")
+
+
+def _append_crypto_perpetual_warning(ctx: _RunContext) -> list[str]:
+    if CRYPTO_PERPETUAL_FUNDING_WARNING not in ctx.warnings:
+        ctx.warnings.append(CRYPTO_PERPETUAL_FUNDING_WARNING)
+        return [CRYPTO_PERPETUAL_FUNDING_WARNING]
+    return []
 
 
 def _is_library_question(user_request: str) -> bool:

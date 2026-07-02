@@ -18,7 +18,11 @@ def cache_path_for(
     start: str,
     end: str,
     cache_dir: Path | None = None,
-    provider: str = "ccxt_binance",
+    # Never actually relied on: every real caller (exchange.fetch_ohlcv) passes
+    # an explicit provider name. Left generic rather than naming one exchange,
+    # so this default doesn't quietly go stale the next time the crypto
+    # provider's underlying exchange changes (see ccxt_perpetual.py).
+    provider: str = "unknown",
 ) -> Path:
     cache_dir = Path(cache_dir or DATA_CACHE_DIR)
     key = f"{provider}_{symbol}_{timeframe}_{start}_{end}"

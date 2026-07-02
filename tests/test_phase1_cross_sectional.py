@@ -57,6 +57,28 @@ def test_cross_sectional_backtest_uses_factor_for_next_period_returns():
     assert result.metrics["symbols"] == 3
 
 
+def test_cross_sectional_backtest_rejects_n_groups_larger_than_available_symbols():
+    """Regression: found via a real crypto universe run where 24 of 30
+    requested symbols had no data over the date range (young meme-coin
+    listings), leaving only 6 symbols against a requested n_groups=10. That
+    used to silently degrade into a "0.0 Sharpe / NaN drawdown" result (every
+    timestamp's group forced to NaN by _assign_groups) instead of a clear
+    error - and in some data shapes surfaced as an opaque numpy TypeError
+    deep in the pipeline. The Coordinator's LLM burned ten retries rewriting
+    compute() because nothing told it the real problem was
+    n_groups-vs-universe-size, not its signal code."""
+    from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backtest
+
+    def compute(df):
+        scores = {"WIN": 3.0, "MID": 2.0, "LOS": 1.0}
+        return pd.Series(scores[df["symbol"].iloc[0]], index=df.index)
+
+    import pytest
+
+    with pytest.raises(ValueError, match=r"n_groups=10 requires at least 10 symbols.*only 3 symbol"):
+        run_cross_sectional_backtest(_panel(), compute, n_groups=10, cost_bps=0)
+
+
 def test_cross_sectional_signal_py_reproduces_real_per_symbol_factor_values(tmp_path, monkeypatch):
     """Regression test for a confirmed bug: running signal.py against panel.parquet
     used to silently mix all symbols together (e.g. pct_change() computed across

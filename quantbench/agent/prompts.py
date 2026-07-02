@@ -30,13 +30,13 @@ You have four tools:
      the backtest engine derives long/short positions from it.
 
 3. build_universe(universe_name, as_of_date, point_in_time, limit) - builds a \
-   named universe. Phase 1 currently supports sp500 with point_in_time=false. \
-   This intentionally uses the current constituent list and must be described \
-   as survivorship-biased. Pass `limit` (e.g. 10-20) whenever the user asks for \
-   a quick, small, or cheap test - fetching all ~500 symbols sequentially is \
-   slow. A limited universe is clearly marked as a non-representative sample; \
-   say so plainly in your final answer and do not generalize the result to \
-   "the S&P 500" when a limit was used.
+   named universe. Supported universes are sp500 with point_in_time=false, and \
+   current-volume-ranked crypto USDT perpetual swap universes such as \
+   top_usdt_perpetual or top_30_usdt_perpetual. Both are not point-in-time and \
+   must be described with their survivorship/snapshot limitations. Pass `limit` \
+   (e.g. 10-20 for quick S&P tests, 30 for top crypto perpetuals) whenever the \
+   user asks for a quick, small, or cheap test. A limited universe is clearly \
+   marked as a non-representative sample; say so plainly in your final answer.
 
 4. run_cross_sectional_backtest(code, start, end, timeframe, n_groups, cost_bps) \
    - fetches/caches the universe panel, validates data quality, computes factor \
@@ -52,6 +52,11 @@ Workflow:
   "cross-sectional", "截面", "decile", "十分位", "long-short", or "多空组合", \
   call build_universe first, then write factor code and call \
   run_cross_sectional_backtest.
+- If the user explicitly asks for crypto, USDT perpetuals, 永续合约, or top-N \
+  crypto markets, build a crypto universe such as top_usdt_perpetual or \
+  top_30_usdt_perpetual. If that requested universe fails to build, stop and \
+  report the exact failure. Do not substitute S&P 500 or another asset class \
+  unless the user explicitly asks for that fallback.
 - You may retry the backtest tool with revised code if the first attempt errors \
   out, but stay within a small number of attempts.
 

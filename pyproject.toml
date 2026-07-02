@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Phase 0 CLI prototype for reproducible quantitative research runs."
 requires-python = ">=3.10"
 dependencies = [
+  "ccxt",
   "click",
   "duckdb",
   "fastapi",
@@ -23,9 +24,6 @@ dependencies = [
   "uvicorn",
   "yfinance",
 ]
-
-[project.optional-dependencies]
-live = ["ccxt"]
 
 [dependency-groups]
 dev = ["pytest"]

@@ -106,6 +106,10 @@ def _extract_oos_sharpe(findings: list[dict[str, Any]]) -> float | None:
 
 def _classify_asset(config: dict[str, Any]) -> str:
     universe = config.get("universe") or {}
+    explicit = universe.get("asset_class")
+    if explicit:
+        return str(explicit)
+
     provider = str(universe.get("provider") or universe.get("source") or "").lower()
     if "yfinance" in provider or "sp500" in provider:
         return "equity"

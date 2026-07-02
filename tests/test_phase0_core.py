@@ -84,14 +84,14 @@ def test_vectorized_backtest_returns_metrics_and_curves():
 
 def test_fetch_ohlcv_marks_synthetic_fallback_and_persists_across_cache_hits(tmp_path, monkeypatch):
     from quantbench.data import exchange
-    from quantbench.data.providers import ccxt_binance
+    from quantbench.data.providers import ccxt_perpetual
 
     monkeypatch.setattr("quantbench.data.cache.DATA_CACHE_DIR", tmp_path)
 
     def boom(*args, **kwargs):
         raise RuntimeError("network blocked")
 
-    monkeypatch.setattr(ccxt_binance, "download_ohlcv", boom)
+    monkeypatch.setattr(ccxt_perpetual, "download_ohlcv", boom)
 
     _, _, meta_first = exchange.fetch_ohlcv("BTC/USDT", "4h", "2023-01-01", "2023-01-05")
     assert meta_first["source"] == "deterministic_synthetic_fallback"

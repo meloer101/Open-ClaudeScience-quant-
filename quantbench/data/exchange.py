@@ -12,7 +12,7 @@ from quantbench.data.cache import (
     write_cache_meta,
     write_parquet_quiet,
 )
-from quantbench.data.providers import ccxt_binance, yfinance_equity
+from quantbench.data.providers import ccxt_perpetual, yfinance_equity
 
 SYNTHETIC_FALLBACK_SOURCE = "deterministic_synthetic_fallback"
 
@@ -54,7 +54,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> tuple[Path
 
 def select_provider(symbol: str):
     if "/" in symbol or ":" in symbol:
-        return ccxt_binance
+        return ccxt_perpetual
     return yfinance_equity
 
 

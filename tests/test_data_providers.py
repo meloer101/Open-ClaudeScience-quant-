@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 
 def test_equity_symbol_uses_yfinance_provider_and_persists_metadata(tmp_path, monkeypatch):
@@ -39,7 +40,7 @@ def test_equity_symbol_uses_yfinance_provider_and_persists_metadata(tmp_path, mo
 
 def test_crypto_pair_uses_ccxt_provider_cache_namespace(tmp_path, monkeypatch):
     from quantbench.data import exchange
-    from quantbench.data.providers import ccxt_binance
+    from quantbench.data.providers import ccxt_perpetual
 
     monkeypatch.setattr("quantbench.data.cache.DATA_CACHE_DIR", tmp_path)
 
@@ -56,10 +57,81 @@ def test_crypto_pair_uses_ccxt_provider_cache_namespace(tmp_path, monkeypatch):
             }
         )
 
-    monkeypatch.setattr(ccxt_binance, "download_ohlcv", fake_ccxt)
+    monkeypatch.setattr(ccxt_perpetual, "download_ohlcv", fake_ccxt)
 
     path, _, meta = exchange.fetch_ohlcv("BTC/USDT", "4h", "2024-01-01", "2024-01-02")
 
-    assert path.name.startswith("ccxt_binance_BTC_USDT_4h_")
-    assert meta["provider"] == "ccxt_binance"
-    assert meta["source"] == "ccxt_binance_swap"
+    # Provider name/cache namespace is derived from ccxt_perpetual.name rather
+    # than hardcoded here, so this test doesn't need editing again the next
+    # time the underlying exchange is swapped (see CCXT_EXCHANGE_ID).
+    assert path.name.startswith(f"{ccxt_perpetual.name}_BTC_USDT_4h_")
+    assert meta["provider"] == ccxt_perpetual.name
+    assert meta["source"] == f"{ccxt_perpetual.name}_swap"
+
+
+@pytest.mark.parametrize(
+    ("markets", "requested_symbol", "expected_resolved_symbol"),
+    [
+        # Binance-style exchange: the bare symbol already IS the perpetual
+        # swap market - must be left unchanged.
+        (
+            {"BTC/USDT": {"swap": True}},
+            "BTC/USDT",
+            "BTC/USDT",
+        ),
+        # OKX-style exchange: the bare symbol is the SPOT market, and the
+        # perpetual swap is a separate ":USDT"-suffixed market. This is the
+        # exact silent-wrong-data bug this test guards against: fetching
+        # "BTC/USDT" here must resolve to "BTC/USDT:USDT", not quietly return
+        # spot data while the rest of the system assumes perpetual-swap
+        # economics.
+        (
+            {"BTC/USDT": {"swap": False}, "BTC/USDT:USDT": {"swap": True}},
+            "BTC/USDT",
+            "BTC/USDT:USDT",
+        ),
+        # Already-qualified symbols are passed through untouched regardless
+        # of what's in the market map.
+        (
+            {"BTC/USDT:USDT": {"swap": True}},
+            "BTC/USDT:USDT",
+            "BTC/USDT:USDT",
+        ),
+    ],
+)
+def test_resolve_swap_symbol_prefers_real_swap_market_over_bare_spot_symbol(
+    markets, requested_symbol, expected_resolved_symbol
+):
+    from quantbench.data.providers.ccxt_perpetual import _resolve_swap_symbol
+
+    class FakeExchange:
+        def load_markets(self):
+            return markets
+
+    assert _resolve_swap_symbol(FakeExchange(), requested_symbol) == expected_resolved_symbol
+
+
+def test_download_ohlcv_fetches_the_resolved_swap_symbol_not_the_bare_one(monkeypatch):
+    """End-to-end (within the provider module): a bare "ETH/USDT" request
+    against an OKX-shaped market map must reach ccxt's fetch_ohlcv with the
+    resolved "ETH/USDT:USDT" swap symbol, not the bare spot symbol."""
+    from quantbench.data.providers import ccxt_perpetual
+
+    requested_symbols = []
+
+    class FakeExchange:
+        def load_markets(self):
+            return {"ETH/USDT": {"swap": False}, "ETH/USDT:USDT": {"swap": True}}
+
+        def parse8601(self, value):
+            return pd.Timestamp(value).value // 1_000_000
+
+        def fetch_ohlcv(self, symbol, timeframe, since, limit):
+            requested_symbols.append(symbol)
+            return []
+
+    monkeypatch.setattr(ccxt_perpetual, "_build_exchange", lambda: FakeExchange())
+
+    ccxt_perpetual.download_ohlcv("ETH/USDT", "4h", "2024-01-01", "2024-01-02")
+
+    assert requested_symbols == ["ETH/USDT:USDT"]

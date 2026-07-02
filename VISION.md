@@ -428,9 +428,12 @@ def compute_momentum(data, lookback=24, vol_filter=True):
 - [ ] 多 agent 协作（研究 agent + 审查 agent 并行）
 - [ ] 自定义 skill 系统
 - [ ] 组合优化
-- [ ] 多资产支持（股票、期货）
+- [x] 多资产支持（crypto 截面补全：当前成交量 Top-N USDT 永续合约 universe、BTC/USDT benchmark 路由、funding rate 未建模警告）
+- [ ] 期货支持（推迟：需要连续合约/展期规则，详见 [PHASE5.md](PHASE5.md) 第一节和第五节）
 - [ ] Paper trading 集成
 - [ ] 远程计算支持（SSH / Modal）
+
+**当前状态（详细计划见 [PHASE5.md](PHASE5.md)）：** Phase 5 先只补齐 crypto 截面研究，而不是一次性吞下期货、多 agent、组合优化等所有高级能力。系统现在可以构建当前按 24h 成交量排名的 Top-N USDT 永续合约 universe，明确标注这不是 point-in-time universe；截面 Reviewer 的 beta exposure 会按资产类别路由，crypto 使用 BTC/USDT，equity 仍使用 SPY；crypto 永续合约 run 会自动写入 funding rate carry cost 未建模的警告。期货支持没有打勾，后续需要先单独设计 continuous contract 和 roll 规则。
 
 ### Phase 6: 生产化 (Week 15+)
 - [ ] Live signal monitoring

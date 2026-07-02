@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
 
+from quantbench.data.providers.ccxt_perpetual import fetch_top_symbols_by_volume
+from quantbench.data.providers.ccxt_perpetual import name as ccxt_provider_name
 from quantbench.data.providers.sp500_constituents import WIKIPEDIA_SP500_URL, fetch_current_constituents
 
 
@@ -24,6 +27,15 @@ LIMITED_SAMPLE_NOTE_TEMPLATE = (
 )
 
 
+CRYPTO_UNIVERSE_NOTE = (
+    "This universe uses the current top-N USDT perpetual swap markets by 24h "
+    "trading volume (queried at run time, not as of `as_of_date`), applied "
+    "across the requested historical window. Perpetuals delisted before "
+    "`as_of_date` are absent, and the volume ranking may not reflect the "
+    "historical ranking at `as_of_date` - this is not a point-in-time universe."
+)
+
+
 @dataclass(frozen=True)
 class UniverseDefinition:
     name: str
@@ -33,6 +45,7 @@ class UniverseDefinition:
     survivorship_bias_note: str
     source: str
     sample_limit: int | None = None
+    asset_class: str = "equity"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -68,6 +81,26 @@ def build_sp500_universe(
         survivorship_bias_note=note,
         source=WIKIPEDIA_SP500_URL,
         sample_limit=limit,
+        asset_class="equity",
+    )
+
+
+def build_crypto_perpetual_universe(as_of_date: str, limit: int = 30) -> UniverseDefinition:
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    top = fetch_top_symbols_by_volume(quote="USDT", limit=limit)
+    if not top:
+        raise ValueError(f"No active USDT perpetual swap markets returned by {ccxt_provider_name}")
+
+    return UniverseDefinition(
+        name="top_usdt_perpetual",
+        as_of_date=as_of_date,
+        symbols=[str(row["symbol"]) for row in top],
+        point_in_time=False,
+        survivorship_bias_note=CRYPTO_UNIVERSE_NOTE,
+        source=f"{ccxt_provider_name}_tickers",
+        sample_limit=limit,
+        asset_class="crypto",
     )
 
 
@@ -77,4 +110,10 @@ def build_universe(
     normalized = name.lower().replace("-", "").replace("_", "")
     if normalized in {"sp500", "s&p500", "sandp500"}:
         return build_sp500_universe(as_of_date=as_of_date, point_in_time=point_in_time, limit=limit)
+    top_n_match = re.fullmatch(r"top(\d+)usdtperpetual", normalized)
+    if normalized in {"topusdtperpetual", "cryptoperpetual", "usdtperpetual"} or top_n_match:
+        if point_in_time:
+            raise NotImplementedError("Point-in-time crypto perpetual membership is not implemented in Phase 5 v1")
+        parsed_limit = int(top_n_match.group(1)) if top_n_match else 30
+        return build_crypto_perpetual_universe(as_of_date=as_of_date, limit=limit or parsed_limit)
     raise ValueError(f"Unsupported universe: {name}")

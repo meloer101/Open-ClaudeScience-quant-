@@ -3114,6 +3114,7 @@ name = "quantbench"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "ccxt" },
     { name = "click" },
     { name = "duckdb" },
     { name = "fastapi" },
@@ -3136,11 +3137,6 @@ dependencies = [
     { name = "yfinance" },
 ]
 
-[package.optional-dependencies]
-live = [
-    { name = "ccxt" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -3148,7 +3144,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ccxt", marker = "extra == 'live'" },
+    { name = "ccxt" },
     { name = "click" },
     { name = "duckdb" },
     { name = "fastapi" },
@@ -3164,7 +3160,6 @@ requires-dist = [
     { name = "uvicorn" },
     { name = "yfinance" },
 ]
-provides-extras = ["live"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]

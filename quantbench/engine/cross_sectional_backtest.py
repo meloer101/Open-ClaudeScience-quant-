@@ -59,6 +59,27 @@ def run_cross_sectional_backtest(
     data["timestamp"] = pd.to_datetime(data["timestamp"], utc=True)
     data = data.sort_values(["symbol", "timestamp"]).reset_index(drop=True)
 
+    # Found via a real crypto universe run: when fewer symbols have data than
+    # n_groups requires, _assign_groups (below) marks every timestamp's group
+    # as NaN - not just some - because `len(section) < n_groups` is true for
+    # every section. That silently degrades into an empty weighted panel and
+    # a "0.0 Sharpe / NaN drawdown" result that looks like a (bad) real
+    # backtest instead of a n_groups/universe-size mismatch, and in some data
+    # shapes surfaces as an opaque numpy TypeError three layers downstream
+    # instead. A clear, immediate error here is far more actionable - callers
+    # (including the LLM Coordinator, which otherwise burns retries rewriting
+    # compute() when the real problem is n_groups vs. universe size) can
+    # reduce n_groups or fetch a larger universe, rather than debugging a
+    # unicorn "isfinite" exception that has nothing to do with their code.
+    available_symbols = data["symbol"].nunique()
+    if available_symbols < n_groups:
+        raise ValueError(
+            f"n_groups={n_groups} requires at least {n_groups} symbols with data, but only "
+            f"{available_symbols} symbol(s) have any data in this panel. Reduce n_groups to at "
+            f"most {available_symbols}, or use a universe with more symbols that have data over "
+            "this date range."
+        )
+
     factor_frames = []
     for symbol, symbol_df in data.groupby("symbol", sort=False):
         symbol_df = symbol_df.sort_values("timestamp").reset_index(drop=True)

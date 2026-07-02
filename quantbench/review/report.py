@@ -91,6 +91,7 @@ def run_review(
     out_of_sample_data: pd.DataFrame,
     run_on_data: Callable[[pd.DataFrame], dict[str, float]],
     benchmark_returns: pd.Series | None = None,
+    benchmark_symbol: str | None = None,
     factor_panel: pd.DataFrame | None = None,
     n_groups: int | None = None,
     turnover_annual: float | None = None,
@@ -103,7 +104,7 @@ def run_review(
     findings.extend(_safe("regime", lambda: [_regime_finding(returns)]))
     findings.extend(_safe("tail_dependence", lambda: [_tail_finding(returns)]))
     findings.append(_turnover_finding(turnover_annual))
-    findings.extend(_safe("beta_exposure", lambda: [_beta_finding(returns, benchmark_returns)]))
+    findings.extend(_safe("beta_exposure", lambda: [_beta_finding(returns, benchmark_returns, benchmark_symbol)]))
     if factor_panel is not None and n_groups is not None:
         findings.extend(_safe("symbol_concentration", lambda: [_symbol_finding(factor_panel, n_groups)]))
     verdict, reason = determine_verdict(findings)
@@ -215,11 +216,16 @@ def _turnover_finding(turnover_annual: float | None) -> ReviewFinding:
     return ReviewFinding("turnover", "pass", "Annualized turnover is below the reviewer warning threshold.", detail)
 
 
-def _beta_finding(returns: pd.Series, benchmark_returns: pd.Series | None) -> ReviewFinding:
+def _beta_finding(
+    returns: pd.Series, benchmark_returns: pd.Series | None, benchmark_symbol: str | None = None
+) -> ReviewFinding:
     if benchmark_returns is None or benchmark_returns.empty:
-        return ReviewFinding("beta_exposure", "info", "Benchmark returns unavailable; beta exposure check skipped.", {})
+        detail = {"benchmark_symbol": benchmark_symbol} if benchmark_symbol else {}
+        return ReviewFinding("beta_exposure", "info", "Benchmark returns unavailable; beta exposure check skipped.", detail)
     beta, r_squared, observations = compute_beta(returns, benchmark_returns)
     detail = {"beta": beta, "r_squared": r_squared, "observations": observations}
+    if benchmark_symbol:
+        detail["benchmark_symbol"] = benchmark_symbol
     if observations < MIN_BETA_OBSERVATIONS:
         return ReviewFinding("beta_exposure", "info", "Not enough aligned benchmark observations to evaluate beta exposure.", detail)
     if r_squared > BETA_R2_WARNING and abs(beta) > BETA_ABS_WARNING:

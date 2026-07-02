@@ -106,8 +106,9 @@ def build_cross_sectional_research_note(
 ## Universe
 - 名称: {universe.get("name", "unknown")}{" (LIMITED SAMPLE, size=" + str(universe.get("sample_limit")) + ")" if universe.get("sample_limit") else ""}
 - as_of_date: {universe.get("as_of_date", "unknown")}
+- asset_class: {universe.get("asset_class", "unknown")}
 - point_in_time: {universe.get("point_in_time", "unknown")}
-- 成分股数量: {len(universe.get("symbols", []))}
+- 标的数量: {len(universe.get("symbols", []))}
 - 来源: {universe.get("source", "unknown")}
 - 生存者偏差说明: {universe.get("survivorship_bias_note", "")}
 
@@ -140,7 +141,7 @@ def build_cross_sectional_research_note(
 {summary or "(未生成总结)"}
 
 ## 局限性声明
-- Phase 1 v1 默认使用当前 S&P 500 成分股回投历史，存在生存者偏差。
+- Universe 可能不是 point-in-time；具体偏差以本报告 Universe 区块和警告区块为准。
 - Reviewer 是确定性启发式检查，不是形式化证明；未被标记不代表没有过拟合或未来函数。
 - 基础数据来自免费源，退市、收购、拆股和缺口需要结合数据质量报告判断。
 
