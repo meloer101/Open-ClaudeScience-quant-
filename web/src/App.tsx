@@ -6,8 +6,21 @@ import { Sidebar } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
 import { ChatPane } from "./components/ChatPane";
 import { ArtifactInspector, type OpenArtifactTab } from "./components/ArtifactInspector";
+import { ResizeHandle } from "./components/ResizeHandle";
 
 const DRAFT_ID = "draft";
+
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 256;
+const INSPECTOR_MIN = 280;
+const INSPECTOR_MAX = 720;
+const INSPECTOR_DEFAULT = 384;
+const CHAT_MIN = 320;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 function artifactKey(runId: string, filename: string): string {
   return `${runId}::${filename}`;
@@ -19,6 +32,24 @@ function App() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [openArtifactTabs, setOpenArtifactTabs] = useState<OpenArtifactTab[]>([]);
   const [activeArtifactKey, setActiveArtifactKey] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT);
+
+  const handleSidebarResize = (deltaX: number) => {
+    setSidebarWidth((prev) => {
+      const next = clamp(prev + deltaX, SIDEBAR_MIN, SIDEBAR_MAX);
+      const available = window.innerWidth - next - inspectorWidth;
+      return available < CHAT_MIN ? prev : next;
+    });
+  };
+
+  const handleInspectorResize = (deltaX: number) => {
+    setInspectorWidth((prev) => {
+      const next = clamp(prev - deltaX, INSPECTOR_MIN, INSPECTOR_MAX);
+      const available = window.innerWidth - sidebarWidth - next;
+      return available < CHAT_MIN ? prev : next;
+    });
+  };
 
   const { data: runs = [], isLoading: isRunsLoading } = useQuery({
     queryKey: ["runs"],
@@ -128,7 +159,9 @@ function App() {
         onSelect={openRunTab}
         onNew={handleNewTab}
         isLoading={isRunsLoading}
+        width={sidebarWidth}
       />
+      <ResizeHandle onResize={handleSidebarResize} />
       <div className="flex-1 flex flex-col min-w-0">
         <SessionTabBar tabs={sessionTabs} activeId={activeTabId} onSelect={selectTab} onClose={closeTab} />
         <div className="flex-1 flex min-h-0">
@@ -143,11 +176,13 @@ function App() {
             onSelectArtifact={handleSelectArtifact}
             onSubmit={handleSubmit}
           />
+          <ResizeHandle onResize={handleInspectorResize} />
           <ArtifactInspector
             tabs={openArtifactTabs}
             activeKey={activeArtifactKey}
             onSelectTab={setActiveArtifactKey}
             onCloseTab={closeArtifactTab}
+            width={inspectorWidth}
           />
         </div>
       </div>

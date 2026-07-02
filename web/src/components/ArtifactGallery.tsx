@@ -19,11 +19,9 @@ export function ArtifactGallery({ runId, artifacts, selectedFilename, onSelect }
   const remaining = artifacts.length - visible.length;
 
   return (
-    <div className="mt-3">
-      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
-        Generated · {artifacts.length}
-      </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+    <div className="mt-4">
+      <div className="text-xs text-warm-400 mb-2">Generated · {artifacts.length}</div>
+      <div className="flex gap-2.5 overflow-x-auto pb-1">
         {visible.map((artifact) => (
           <ArtifactCard
             key={artifact.filename}
@@ -36,7 +34,7 @@ export function ArtifactGallery({ runId, artifacts, selectedFilename, onSelect }
         {!expanded && remaining > 0 && (
           <button
             onClick={() => setExpanded(true)}
-            className="w-32 shrink-0 rounded-lg border border-dashed border-slate-300 text-sm text-slate-500 hover:bg-slate-50"
+            className="w-36 h-[104px] shrink-0 rounded-xl border border-warm-150 text-sm text-warm-500 hover:bg-warm-50 transition-colors"
           >
             +{remaining} more
           </button>

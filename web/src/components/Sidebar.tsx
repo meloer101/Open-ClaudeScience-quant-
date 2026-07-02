@@ -6,6 +6,7 @@ interface SidebarProps {
   onSelect: (runId: string) => void;
   onNew: () => void;
   isLoading: boolean;
+  width: number;
 }
 
 function dateGroupLabel(createdAt: string): string {
@@ -20,13 +21,17 @@ function dateGroupLabel(createdAt: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function statusDot(status: RunSummary["status"]) {
-  const color =
-    status === "completed" ? "bg-emerald-500" : status === "failed" ? "bg-red-500" : "bg-amber-400 animate-pulse";
-  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} aria-label={status} />;
+function StatusDot({ status }: { status: RunSummary["status"] }) {
+  if (status === "running") {
+    return <span className="inline-block w-1.5 h-1.5 rounded-full bg-warn-200 animate-pulse" aria-label={status} />;
+  }
+  if (status === "failed") {
+    return <span className="inline-block w-1.5 h-1.5 rounded-full bg-danger-400" aria-label={status} />;
+  }
+  return <span className="inline-block w-1.5 h-1.5 rounded-full border border-warm-300" aria-label={status} />;
 }
 
-export function Sidebar({ runs, selectedRunId, onSelect, onNew, isLoading }: SidebarProps) {
+export function Sidebar({ runs, selectedRunId, onSelect, onNew, isLoading, width }: SidebarProps) {
   const groups = new Map<string, RunSummary[]>();
   for (const run of runs) {
     const label = dateGroupLabel(run.created_at);
@@ -35,34 +40,35 @@ export function Sidebar({ runs, selectedRunId, onSelect, onNew, isLoading }: Sid
   }
 
   return (
-    <div className="w-64 shrink-0 border-r border-slate-200 bg-white h-full flex flex-col">
-      <div className="p-3 border-b border-slate-200">
-        <div className="font-semibold text-slate-800 mb-2">QuantBench</div>
+    <div className="shrink-0 bg-warm-25 h-full flex flex-col overflow-hidden" style={{ width }}>
+      <div className="px-3 pt-4 pb-3">
+        <div className="font-medium text-warm-900 mb-3 px-1">QuantBench</div>
         <button
           onClick={onNew}
-          className="w-full text-left text-sm px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700"
+          className="w-full text-left text-sm px-2.5 py-1.5 rounded-md text-warm-700 hover:bg-warm-100 transition-colors flex items-center gap-1.5"
         >
-          + New
+          <span className="text-warm-400">+</span>
+          New
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto py-2">
-        {isLoading && <div className="px-3 py-2 text-sm text-slate-400">Loading…</div>}
+      <div className="flex-1 overflow-y-auto pb-2">
+        {isLoading && <div className="px-3 py-2 text-sm text-warm-400">Loading…</div>}
         {!isLoading && runs.length === 0 && (
-          <div className="px-3 py-2 text-sm text-slate-400">还没有任何 run，点上面 + New 开始</div>
+          <div className="px-3 py-2 text-sm text-warm-400">Start your first run above.</div>
         )}
         {Array.from(groups.entries()).map(([label, group]) => (
-          <div key={label} className="mb-2">
-            <div className="px-3 py-1 text-xs font-semibold text-slate-400 uppercase tracking-wide">{label}</div>
+          <div key={label} className="mb-1 px-2">
+            <div className="px-2 py-1 text-xs text-warm-400">{label}</div>
             {group.map((run) => (
               <button
                 key={run.run_id}
                 onClick={() => onSelect(run.run_id)}
-                className={`w-full text-left px-3 py-2 text-sm flex items-start gap-2 hover:bg-slate-50 ${
-                  run.run_id === selectedRunId ? "bg-slate-100" : ""
+                className={`w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-2 transition-colors ${
+                  run.run_id === selectedRunId ? "bg-warm-100 text-warm-900" : "text-warm-700 hover:bg-warm-100/60"
                 }`}
               >
-                <span className="mt-1.5">{statusDot(run.status)}</span>
-                <span className="truncate flex-1 text-slate-700">{run.user_request || run.run_id}</span>
+                <StatusDot status={run.status} />
+                <span className="truncate flex-1">{run.user_request || run.run_id}</span>
               </button>
             ))}
           </div>

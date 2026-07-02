@@ -25,13 +25,13 @@ export function ChatPane({
     <div className="flex-1 flex flex-col h-full min-w-0">
       <div className="flex-1 overflow-y-auto p-6">
         {isDraft && (
-          <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+          <div className="h-full flex items-center justify-center text-warm-400 text-sm">
             提出一个量化研究问题开始，比如「测试 RSI(14) 反转因子在 AAPL 上的表现」
           </div>
         )}
-        {!isDraft && !run && isLoading && <div className="text-sm text-slate-400">Loading…</div>}
+        {!isDraft && !run && isLoading && <div className="text-sm text-warm-400">Loading…</div>}
         {!isDraft && !run && !isLoading && (
-          <div className="h-full flex items-center justify-center text-slate-400 text-sm">选一个会话开始</div>
+          <div className="h-full flex items-center justify-center text-warm-400 text-sm">选一个会话开始</div>
         )}
         {run && (
           <ChatMessage

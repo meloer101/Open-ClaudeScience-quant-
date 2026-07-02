@@ -19,8 +19,8 @@ function MetricsTable({ metrics }: { metrics: Record<string, number> }) {
       <tbody>
         {entries.map(([key, value]) => (
           <tr key={key}>
-            <td className="pr-4 py-0.5 text-slate-500">{key}</td>
-            <td className="py-0.5 font-mono text-slate-800">
+            <td className="pr-4 py-0.5 text-warm-500">{key}</td>
+            <td className="py-0.5 font-mono text-warm-800">
               {typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 4 }) : value}
             </td>
           </tr>
@@ -34,7 +34,7 @@ export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifac
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <div className="max-w-2xl bg-blue-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
+        <div className="max-w-2xl bg-warm-900 text-white rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
           {run.user_request}
         </div>
       </div>
@@ -42,8 +42,8 @@ export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifac
       <div className="max-w-3xl">
         {run.status === "running" && <LiveProgress events={liveEvents} />}
         {run.status === "failed" && (
-          <div className="border-2 border-red-400 bg-red-50 rounded-lg p-3 text-sm text-red-800">
-            <div className="font-bold mb-1">运行失败</div>
+          <div className="border border-danger-200 bg-danger-50 rounded-xl p-3 text-sm text-danger-900">
+            <div className="font-medium mb-1">运行失败</div>
             <pre className="whitespace-pre-wrap text-xs">{run.error || "Unknown error"}</pre>
           </div>
         )}
