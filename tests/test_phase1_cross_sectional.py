@@ -107,6 +107,14 @@ def test_cross_sectional_signal_py_reproduces_real_per_symbol_factor_values(tmp_
     config = __import__("yaml").safe_load((result.run_dir / "config.yaml").read_text(encoding="utf-8"))
     assert config["data_path"] == str(result.run_dir / "panel.parquet")
 
+    # Phase 4 regression: the cross-sectional path used to save its backtest
+    # result as "cross_sectional_backtest_result.json" - a different filename
+    # than the single-symbol path's "backtest_result.json" - which silently
+    # broke every reader that assumes one canonical name (ChartsPanel,
+    # library/compare.py's compute_returns_correlation()). Must stay unified.
+    assert (result.run_dir / "backtest_result.json").exists()
+    assert not (result.run_dir / "cross_sectional_backtest_result.json").exists()
+
     output_csv = tmp_path / "standalone_output.csv"
     completed = subprocess.run(
         [sys.executable, str(result.run_dir / "signal.py"), config["data_path"], "--output", str(output_csv)],

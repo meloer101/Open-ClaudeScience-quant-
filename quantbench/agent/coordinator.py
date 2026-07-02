@@ -313,7 +313,11 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
         panel_path = run.run_dir / "panel.parquet"
         panel.to_parquet(panel_path, index=False)
         run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
-        run.save_json("cross_sectional_backtest_result.json", backtest.to_json_dict())
+        # Same filename as the single-symbol path (not "cross_sectional_backtest_result.json" -
+        # that name drifted from the single-symbol path's and matches nothing else in the
+        # codebase or README's documented artifact layout; readers like ChartsPanel and
+        # library/compare.py's compute_returns_correlation() look for one canonical name).
+        run.save_json("backtest_result.json", backtest.to_json_dict())
         run.save_json("data_quality_report.json", ctx.data_quality.to_dict())
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
         save_drawdown_plot(backtest.drawdown, run.run_dir / "drawdown.png")

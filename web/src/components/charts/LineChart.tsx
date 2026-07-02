@@ -74,8 +74,8 @@ export function LineChart({
               </text>
             </g>
           ))}
-          {thresholds.map((threshold) => (
-            <g key={threshold.label}>
+          {thresholds.map((threshold, index) => (
+            <g key={`${threshold.label}-${index}-${threshold.value}`}>
               <line
                 x1={0}
                 x2={plotWidth}

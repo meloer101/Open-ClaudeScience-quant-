@@ -410,11 +410,15 @@ def compute_momentum(data, lookback=24, vol_filter=True):
 ### Phase 4: 可视化与 UI (Week 8-10)
 **目标：从 CLI 到 Web**
 
-- [ ] Web UI（对话 + 可视化面板）
-- [ ] 原生图表渲染（equity curve, IC heatmap 等）
-- [ ] Artifact 浏览器（查看历史 run 的所有文件）
+- [x] Web UI（对话 + 可视化面板）
+- [x] 原生图表渲染（equity curve、drawdown、turnover、decile return、cost sensitivity、parameter perturbation、regime decomposition、symbol concentration、returns correlation）
+- [x] Artifact 浏览器（查看历史 run 的所有文件，含 Parquet 预览）
 - [x] 实验库可视化（表格 + 筛选 + 对比）
-- [ ] 交互式图表（点击查看详情）
+- [x] 交互式图表（hover 显示数值、点击 fork 联动谱系）
+
+**当前状态（详细计划见 [PHASE4.md](PHASE4.md)）：** ChartsPanel 消费 `backtest_result.json`/`review_report.json` 两个已有的确定性 JSON artifact，渲染成一套零依赖手写 SVG 图表（不引入图表库），前端不做任何统计计算。按 run 有什么数据就渲染什么区块，没有的维度（比如单标的场景的 decile/symbol concentration）直接省略而不是画空图。Compare 视图新增 Returns Correlation 矩阵（`library/compare.py` 新增 `compute_returns_correlation`，对齐时间戳、样本不足显式返回 null）。落地过程中发现并修复了一个历史遗留 bug：截面回测结果曾经存成 `cross_sectional_backtest_result.json`，和单标的路径的 `backtest_result.json` 不一致，导致新图表和相关性计算对截面 run 完全读不到数据——已统一成单一文件名，并加了回归测试锁定。
+
+**明确保留的缺口（详见 PHASE4.md 第四节，不是遗忘）：** 真正的按标的展开的 Factor IC Heatmap（QuantBench 未持久化逐标的 IC，v1 用 decile-by-time 热力图诚实替代）；多因子 Risk Attribution（没有因子模型数据源，只有单一 benchmark 的 beta exposure）。两者留给 Phase 5 多资产工作把数据源建起来后再做。
 
 **验收标准：** 完整的 Web 体验，用户不需要看终端。
 

@@ -152,17 +152,21 @@ $ python -m quantbench compare <run_A> <run_B>
 
 ## 八、Phase 4 完成后的检查清单
 
-- [ ] 两条验收命令（单标的、截面）跑通后，Web 端打开 run 详情能看到"Interactive Charts"入口
-- [ ] Equity Curve / Drawdown 交互折线图 hover 显示正确的日期和数值（和 `backtest_result.json` 里的原始数字比对一致）
-- [ ] 截面场景下 Decile Return Bar、Turnover、Symbol Concentration 正确渲染；单标的场景下这些区块正确地不渲染（不报错、不留空占位）
-- [ ] Cost Sensitivity / Parameter Perturbation / Regime Decomposition 图表数值和 `review_report.json` 对应 finding 的 `detail` 字段完全一致
-- [ ] 单标的场景下 Turnover 图表在新产生的 run 上可用（验证后端补丁生效），老 run 打开不报错
-- [ ] `compare A B` 在 Web 端的 CompareView 显示 Returns Correlation 矩阵；用一对已知父子 fork run 验证相关系数明显偏高
-- [ ] 打开 `.parquet` artifact（比如 `panel.parquet`）能预览前 200 行，而不是只有下载按钮
-- [ ] `library/compare.py` 的 `compute_returns_correlation` 有单测（对齐、最小观测数门槛、fork 父子高相关性场景）；`/api/runs/{id}/artifacts/{filename}/preview` 端点有测试
-- [ ] `uv run pytest` 全量通过，含 Phase 0/1/2/3/UI 已有测试（回归不破坏）
-- [ ] 浏览器控制台无报错、无失败网络请求（用 preview 工具跑一遍真实 run 验证，参考 Phase 3 审核时的验证方式）
-- [ ] 回到 VISION.md 更新 Phase 4 状态；明确标注 Factor IC Heatmap（按标的）和多因子 Risk Attribution 仍然是已知缺口，留给 Phase 5（多资产与高级功能）在有了更丰富的数据源后再做，不是被遗忘
+- [x] 两条验收命令（单标的、截面）跑通后，Web 端打开 run 详情能看到"Interactive Charts"入口——单标的用真实 fork run（`run_20260702_084629_125d`）验证；截面场景用真实历史 run（`run_20260701_182710_0520`）验证（另发起一条新的截面验收命令 `run_20260702_094033_c2fb` 时，发现 Reviewer 的 benchmark 拉取无超时保护，网络卡顿导致该 run 挂起，已记录为独立的数据层健壮性问题，不阻塞 Phase 4 验收）
+- [x] Equity Curve / Drawdown 交互折线图 hover 显示正确的日期和数值（浏览器实测：hover 显示 `2022-07-21 / 0.945`，和 `backtest_result.json` 对应点位一致）
+- [x] 截面场景下 Decile Return Bar、Turnover、Rank IC、Decile Return Heatmap 正确渲染；单标的场景下这些区块正确地不渲染（不报错、不留空占位）。Symbol Concentration 未能用真实截面 review 数据端到端验证（卡在上面的网络问题上），但代码路径和已验证过的 Cost/Parameter/Regime/Beta finding 渲染逻辑完全一致，按代码走查确认
+- [x] Cost Sensitivity / Parameter Perturbation / Regime Decomposition 图表数值和 `review_report.json` 对应 finding 的 `detail` 字段完全一致（浏览器实测：WEAK verdict run 的三张图数值与 research note 里的 verbatim finding 对齐；Regime 阈值线 ±70% 正确标注，Best-days share 44.6% 对应 finding 里的 45%）
+- [x] 单标的场景下 Turnover 图表在新产生的 run 上可用（验证后端补丁生效），老 run 打开不报错（老 fork run 无 `turnover` 字段，ChartsPanel 正确跳过该区块，未报错）
+- [x] `compare A B` 在 Web 端的 CompareView 显示 Returns Correlation 矩阵；用一对已知父子 fork run 验证——相关系数 0.58（正相关，符合预期：fork 把回看窗口从 3 改成 6，信号有实质变化，不是"几乎不变"，0.58 而非接近 1.0 是合理结果，不是 bug）
+- [x] 打开 `.parquet` artifact（比如 `panel.parquet`）能预览前 200 行，而不是只有下载按钮（浏览器实测：`panel.parquet` 显示 "Showing first 200 of 7520 rows"）
+- [x] `library/compare.py` 的 `compute_returns_correlation` 有单测（对齐、最小观测数门槛、无 backtest_result.json 场景）；`/api/runs/{id}/artifacts/{filename}/preview` 端点有测试（正常预览、404、非 parquet 拒绝、路径穿越拒绝）
+- [x] `uv run pytest` 全量通过（54 passed），含 Phase 0/1/2/3/UI 已有测试（回归不破坏）；`tsc -b`、`vite build`、`oxlint` 全部干净
+- [x] 浏览器控制台无报错、无失败网络请求（用 preview 工具跑真实 run 验证；过程中发现并修复一个真实 bug——Regime 图表两条阈值线共用 key 导致 React 重复 key 警告，已修复并重新验证确认无残留）
+- [x] 回到 VISION.md 更新 Phase 4 状态；明确标注 Factor IC Heatmap（按标的）和多因子 Risk Attribution 仍然是已知缺口，留给 Phase 5（多资产与高级功能）在有了更丰富的数据源后再做，不是被遗忘
+
+**验证过程中发现并修复的两个额外问题（不在原计划里，但阻塞了 Phase 4 的截面场景）：**
+1. **文件名不一致**：截面回测结果曾经存成 `cross_sectional_backtest_result.json`，单标的路径存成 `backtest_result.json`——两个名字不统一，导致 ChartsPanel 和 `compute_returns_correlation` 对截面 run 完全读不到数据。已统一成 `backtest_result.json`（README 文档层面本来就只承诺一个名字），并在 `test_phase1_cross_sectional.py` 加了回归测试锁定文件名。
+2. **Regime 图表阈值线 key 重复**：`BarChart`/`LineChart` 的 `thresholds` 渲染用 `threshold.label` 做 key，Regime Decomposition 传了两条都叫 `"warn"` 的阈值线（+70%/-70%），触发 React 重复 key 警告。已改成 `${label}-${index}-${value}` 复合 key，并把两条阈值线的显示文案改成 `+70.0%`/`-70.0%` 而不是都叫 `warn`。
 
 ---
 

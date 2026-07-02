@@ -162,8 +162,8 @@ export function ChartsPanel({ runId }: ChartsPanelProps) {
             data={regimeData}
             formatValue={pct}
             thresholds={[
-              { value: REGIME_CONCENTRATION_THRESHOLD, label: "warn", color: "var(--color-warn-200)" },
-              { value: -REGIME_CONCENTRATION_THRESHOLD, label: "warn", color: "var(--color-warn-200)" },
+              { value: REGIME_CONCENTRATION_THRESHOLD, label: `+${pct(REGIME_CONCENTRATION_THRESHOLD)}`, color: "var(--color-warn-200)" },
+              { value: -REGIME_CONCENTRATION_THRESHOLD, label: `-${pct(REGIME_CONCENTRATION_THRESHOLD)}`, color: "var(--color-warn-200)" },
             ]}
           />
         </Section>
