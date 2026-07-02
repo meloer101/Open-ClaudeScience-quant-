@@ -130,8 +130,9 @@ Web UI 默认连接本地 FastAPI 服务。
 ### 近期
 
 - 打磨 Web 工作台的加载态、失败态和空状态。
-- 完成运行进度的实时展示，支持 SSE 或 WebSocket 事件流。
-- 补齐 API 和 UI 的端到端测试；给前端补一套测试框架（目前坐标换算等纯函数只做了手工验证）。
+- ~~完成运行进度的实时展示，支持 SSE 或 WebSocket 事件流。~~ 已支持：`useRunEvents` 通过 SSE 订阅运行中的 run，见 [useRunEvents.ts](web/src/hooks/useRunEvents.ts)。
+- 前端测试框架已引入（Vitest + Testing Library），覆盖了坐标换算、Heatmap 聚合等纯函数和关键组件。
+- API/UI 端到端测试已引入（Playwright，`web/e2e/`）：驱动真实的 FastAPI 后端和 Vite 前端，覆盖 run 列表浏览、run 详情、warnings/summary 展示、artifact 打开等关键路径；测试数据通过 `global-setup`/`global-teardown` 播种/清理到 `runs/` 目录，不污染真实历史记录。
 
 ### 研究质量
 
