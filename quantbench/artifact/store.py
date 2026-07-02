@@ -74,6 +74,7 @@ class Run:
         summary: str = "",
         metrics: dict[str, Any] | None = None,
         review: dict[str, Any] | None = None,
+        parent_run_id: str | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -84,6 +85,7 @@ class Run:
             "summary": summary,
             "metrics": metrics or {},
             "review": review,
+            "parent_run_id": parent_run_id,
             "data_hash": data_hash,
             "code_hash": code_hash,
             "warnings": warnings or [],

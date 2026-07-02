@@ -252,3 +252,85 @@ def test_stream_run_events_ends_immediately_for_untracked_run(tmp_path, monkeypa
 def test_create_run_rejects_empty_request(client):
     response = client.post("/api/runs", json={"request": "   "})
     assert response.status_code == 400
+
+
+def _write_phase3_run(runs_dir, run_id, *, hypothesis="momentum AAPL", sharpe=1.0, verdict="PROMISING", parent=None):
+    run_dir = runs_dir / run_id
+    run_dir.mkdir(parents=True)
+    findings = [
+        {
+            "check": "out_of_sample",
+            "severity": "warning",
+            "message": "decay",
+            "detail": {"test_metrics": {"sharpe": sharpe - 0.2}},
+        }
+    ]
+    manifest = {
+        "run_id": run_id,
+        "user_request": hypothesis,
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "summary": "done",
+        "metrics": {"sharpe": sharpe, "annual_return": 0.1},
+        "warnings": [],
+        "review": {"verdict": verdict, "verdict_reason": "reason", "findings": findings},
+        "parent_run_id": parent,
+    }
+    config = {
+        "hypothesis": hypothesis,
+        "data_path": "/tmp/data_cache/yfinance_equity_AAPL_1d.parquet",
+        "parent_run_id": parent,
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (run_dir / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (run_dir / "signal.py").write_text(f"def compute(df):\n    return df.close * {sharpe}\n", encoding="utf-8")
+
+
+def test_library_api_summary_compare_and_lineage(tmp_path, client):
+    _write_phase3_run(tmp_path, "run_20260701_000000_a", hypothesis="momentum AAPL", sharpe=1.0)
+    _write_phase3_run(
+        tmp_path,
+        "run_20260701_000001_b",
+        hypothesis="momentum AAPL 60d",
+        sharpe=1.4,
+        verdict="STRONG",
+        parent="run_20260701_000000_a",
+    )
+
+    library_response = client.get("/api/library?verdict=PROMISING,STRONG&asset=equity&sort=sharpe")
+    assert library_response.status_code == 200
+    assert [row["run_id"] for row in library_response.json()] == ["run_20260701_000001_b", "run_20260701_000000_a"]
+
+    summary_response = client.get("/api/library/summary")
+    assert summary_response.status_code == 200
+    assert summary_response.json()[0]["count"] == 2
+    assert summary_response.json()[0]["sharpe_mean"] == pytest.approx(1.2)
+
+    compare_response = client.get("/api/compare?run_ids=run_20260701_000000_a,run_20260701_000001_b")
+    assert compare_response.status_code == 200
+    assert compare_response.json()["metrics"]["sharpe"]["run_20260701_000001_b"] == 1.4
+
+    lineage_response = client.get("/api/runs/run_20260701_000001_b/lineage")
+    assert lineage_response.status_code == 200
+    assert [node["run_id"] for node in lineage_response.json()["chain"]] == [
+        "run_20260701_000000_a",
+        "run_20260701_000001_b",
+    ]
+
+
+def test_fork_endpoint_delegates_to_run_manager(tmp_path, monkeypatch):
+    monkeypatch.setattr("quantbench.api.run_reader.RUNS_DIR", tmp_path)
+    from quantbench.api import server as server_mod
+
+    class FakeManager:
+        def fork(self, run_id, modification):
+            assert run_id == "run_20260701_000000_a"
+            assert modification == "把窗口改成60日"
+            return "run_20260701_000002_fork"
+
+    monkeypatch.setattr(server_mod, "_manager", FakeManager())
+    test_client = TestClient(server_mod.app)
+
+    response = test_client.post("/api/runs/run_20260701_000000_a/fork", json={"modification": "把窗口改成60日"})
+
+    assert response.status_code == 200
+    assert response.json() == {"run_id": "run_20260701_000002_fork", "status": "running"}

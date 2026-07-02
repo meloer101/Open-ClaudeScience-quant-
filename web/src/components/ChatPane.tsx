@@ -1,6 +1,9 @@
 import type { RunDetail, RunEvent } from "../types";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
+import { CompareView } from "./CompareView";
+import { ForkRunForm } from "./ForkRunForm";
+import { RunLineage } from "./RunLineage";
 
 interface ChatPaneProps {
   run: RunDetail | null;
@@ -10,6 +13,9 @@ interface ChatPaneProps {
   selectedFilename: string | null;
   onSelectArtifact: (filename: string) => void;
   onSubmit: (request: string) => Promise<void>;
+  compareRunIds: string[];
+  onClearCompare: () => void;
+  onForked: (runId: string) => void;
 }
 
 export function ChatPane({
@@ -20,9 +26,13 @@ export function ChatPane({
   selectedFilename,
   onSelectArtifact,
   onSubmit,
+  compareRunIds,
+  onClearCompare,
+  onForked,
 }: ChatPaneProps) {
   return (
     <div className="flex-1 flex flex-col h-full min-w-0">
+      <CompareView runIds={compareRunIds} onClear={onClearCompare} />
       <div className="flex-1 overflow-y-auto p-6">
         {isDraft && (
           <div className="h-full flex items-center justify-center text-warm-400 text-sm">
@@ -34,12 +44,16 @@ export function ChatPane({
           <div className="h-full flex items-center justify-center text-warm-400 text-sm">选一个会话开始</div>
         )}
         {run && (
-          <ChatMessage
-            run={run}
-            liveEvents={liveEvents}
-            selectedFilename={selectedFilename}
-            onSelectArtifact={onSelectArtifact}
-          />
+          <>
+            <ChatMessage
+              run={run}
+              liveEvents={liveEvents}
+              selectedFilename={selectedFilename}
+              onSelectArtifact={onSelectArtifact}
+            />
+            <RunLineage runId={run.run_id} />
+            {run.status === "completed" && <ForkRunForm runId={run.run_id} onForked={onForked} />}
+          </>
         )}
       </div>
       <ChatInput onSubmit={onSubmit} />

@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "quantbench-api",
-      "runtimeExecutable": "python3",
+      "runtimeExecutable": ".venv/bin/python3",
       "runtimeArgs": ["-m", "uvicorn", "quantbench.api.server:app", "--port", "8000", "--reload"],
       "port": 8000
     },

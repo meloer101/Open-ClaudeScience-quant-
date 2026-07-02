@@ -39,3 +39,28 @@ class NewRunResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str
+
+
+class ExperimentRecordSchema(BaseModel):
+    run_id: str
+    hypothesis: str
+    created_at: str
+    status: str
+    asset_class: str
+    factor_family: str
+    cross_sectional: bool
+    sharpe: float | None = None
+    annual_return: float | None = None
+    max_drawdown: float | None = None
+    turnover_annual: float | None = None
+    ic_mean: float | None = None
+    oos_sharpe: float | None = None
+    verdict: str | None = None
+    critical_count: int
+    warning_count: int
+    parent_run_id: str | None = None
+    error_summary: str | None = None
+
+
+class ForkRequest(BaseModel):
+    modification: str

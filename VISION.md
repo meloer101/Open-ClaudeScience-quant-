@@ -396,12 +396,14 @@ def compute_momentum(data, lookback=24, vol_filter=True):
 ### Phase 3: 实验管理 (Week 6-7)
 **目标：研究记忆和知识积累**
 
-- [ ] Experiment Library（所有 run 的结构化索引）
-- [ ] Run 对比功能
-- [ ] 谱系追踪（parent/child runs）
-- [ ] Session forking
-- [ ] Research Note 自动生成（结构化 Markdown）
-- [ ] 失败原因记录和知识沉淀
+- [x] Experiment Library（所有 run 的结构化索引）
+- [x] Run 对比功能
+- [x] 谱系追踪（parent/child runs）
+- [x] Session forking
+- [x] Research Note 自动生成（结构化 Markdown，fork run 含谱系区块）
+- [x] 失败原因记录和知识沉淀
+
+**当前状态：** CLI/API/Web 已支持实验库检索、对比、谱系和 fork；`library.summarize()` 会产出按 `factor_family × asset_class` 的确定性聚合表，Coordinator 的历史实验问答模式会先注入该表，再让模型只做解读。
 
 **验收标准：** 跑完 20 个因子后，能问 "哪些类型的因子在 crypto 上最有希望"，系统基于实验历史给出有数据支撑的回答。
 
@@ -411,7 +413,7 @@ def compute_momentum(data, lookback=24, vol_filter=True):
 - [ ] Web UI（对话 + 可视化面板）
 - [ ] 原生图表渲染（equity curve, IC heatmap 等）
 - [ ] Artifact 浏览器（查看历史 run 的所有文件）
-- [ ] 实验库可视化（表格 + 筛选 + 对比）
+- [x] 实验库可视化（表格 + 筛选 + 对比）
 - [ ] 交互式图表（点击查看详情）
 
 **验收标准：** 完整的 Web 体验，用户不需要看终端。

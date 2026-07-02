@@ -57,6 +57,28 @@ class RunManager:
         self._executor.submit(_task)
         return run.run_id
 
+    def fork(self, parent_run_id: str, modification: str) -> str:
+        run = self._store.create_run(f"Fork {parent_run_id}: {modification}")
+        coordinator = Coordinator()
+        event_queue: queue.Queue = queue.Queue()
+        self._queues[run.run_id] = event_queue
+
+        def on_event(event: dict[str, Any]) -> None:
+            event_queue.put(event)
+            if event.get("type") == "final":
+                event_queue.put(_STREAM_END)
+
+        def _task() -> None:
+            try:
+                coordinator.execute_fork(run, parent_run_id, modification, on_event=on_event)
+            except Exception:
+                run.save_json("error.json", {"traceback": traceback.format_exc()})
+                event_queue.put({"type": "error", "message": traceback.format_exc()})
+                event_queue.put(_STREAM_END)
+
+        self._executor.submit(_task)
+        return run.run_id
+
     def has_live_stream(self, run_id: str) -> bool:
         return run_id in self._queues
 

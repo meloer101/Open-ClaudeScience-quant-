@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listRuns, createRun, getRun } from "./api/client";
+import { listRuns, createRun, getRun, listLibrary } from "./api/client";
 import { useRunEvents } from "./hooks/useRunEvents";
 import { Sidebar } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
@@ -34,6 +34,8 @@ function App() {
   const [activeArtifactKey, setActiveArtifactKey] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT);
+  const [compareRunIds, setCompareRunIds] = useState<string[]>([]);
+  const [libraryFilters, setLibraryFilters] = useState({ verdict: "", asset: "", sort: "created_at" });
 
   const handleSidebarResize = (deltaX: number) => {
     setSidebarWidth((prev) => {
@@ -54,6 +56,17 @@ function App() {
   const { data: runs = [], isLoading: isRunsLoading } = useQuery({
     queryKey: ["runs"],
     queryFn: listRuns,
+    refetchInterval: 3000,
+  });
+
+  const { data: libraryRecords = [] } = useQuery({
+    queryKey: ["library", libraryFilters],
+    queryFn: () =>
+      listLibrary({
+        verdict: libraryFilters.verdict,
+        asset: libraryFilters.asset,
+        sort: libraryFilters.sort,
+      }),
     refetchInterval: 3000,
   });
 
@@ -95,6 +108,10 @@ function App() {
   const openRunTab = (runId: string) => {
     setOpenTabs((prev) => (prev.includes(runId) ? prev : [...prev, runId]));
     setActiveTabId(runId);
+  };
+
+  const toggleCompare = (runId: string) => {
+    setCompareRunIds((prev) => (prev.includes(runId) ? prev.filter((id) => id !== runId) : [...prev, runId]));
   };
 
   const handleNewTab = () => {
@@ -149,15 +166,30 @@ function App() {
     });
     setActiveTabId(run_id);
     await queryClient.invalidateQueries({ queryKey: ["runs"] });
+    await queryClient.invalidateQueries({ queryKey: ["library"] });
+  };
+
+  const handleForked = async (runId: string) => {
+    openRunTab(runId);
+    await queryClient.invalidateQueries({ queryKey: ["runs"] });
+    await queryClient.invalidateQueries({ queryKey: ["library"] });
   };
 
   return (
     <div className="h-screen w-screen flex">
       <Sidebar
         runs={runs}
+        libraryRecords={libraryRecords}
         selectedRunId={activeRunId}
         onSelect={openRunTab}
         onNew={handleNewTab}
+        compareRunIds={compareRunIds}
+        onToggleCompare={toggleCompare}
+        onOpenCompare={() => {
+          if (compareRunIds[0]) openRunTab(compareRunIds[0]);
+        }}
+        libraryFilters={libraryFilters}
+        onLibraryFiltersChange={setLibraryFilters}
         isLoading={isRunsLoading}
         width={sidebarWidth}
       />
@@ -175,6 +207,9 @@ function App() {
             }
             onSelectArtifact={handleSelectArtifact}
             onSubmit={handleSubmit}
+            compareRunIds={compareRunIds}
+            onClearCompare={() => setCompareRunIds([])}
+            onForked={handleForked}
           />
           <ResizeHandle onResize={handleInspectorResize} />
           <ArtifactInspector

@@ -1,3 +1,4 @@
+import difflib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ import pandas as pd
 
 from quantbench.agent.llm import LLMClient
 from quantbench.agent.prompts import SYSTEM_PROMPT
+from quantbench.api import run_reader
 from quantbench.artifact.store import ArtifactStore
 from quantbench.config import DEFAULT_COST_BPS, DEFAULT_MODEL, MAX_STEPS, RUNS_DIR
 from quantbench.data.cache import file_sha256
@@ -18,6 +20,9 @@ from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backt
 from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
 from quantbench.review import ReviewReport, run_review
+from quantbench.library.aggregate import summarize as summarize_library
+from quantbench.library.fork import build_fork_config
+from quantbench.library.index import ExperimentIndex
 from quantbench.skills.codeexec import load_signal_function, run_signal_code
 from quantbench.skills.data_quality import DataQualityReport, validate_universe_data
 from quantbench.skills.plot import save_drawdown_plot, save_equity_curve_plot, save_group_returns_plot, save_ic_plot
@@ -368,6 +373,52 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
     return registry
 
 
+def _build_fork_registry(ctx: _RunContext, run) -> SkillRegistry:
+    registry = SkillRegistry()
+
+    def _run_signal_backtest(code: str, cost_bps: float = DEFAULT_COST_BPS) -> dict:
+        if ctx.data_df is None:
+            return {"error": "fork data is unavailable - parent data_path could not be loaded"}
+
+        signal = run_signal_code(code, ctx.data_df)
+        backtest = run_vectorized_backtest(ctx.data_df, signal, cost_bps=cost_bps)
+
+        ctx.signal_code = code
+        ctx.last_metrics = backtest.metrics
+        run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
+        run.save_json("backtest_result.json", backtest.to_json_dict())
+        save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
+        save_drawdown_plot(backtest.drawdown, run.run_dir / "drawdown.png")
+
+        new_warnings = sanity_check_metrics(backtest.metrics)
+        review_report = run_review(
+            code=code,
+            returns=backtest.returns,
+            cost_bps=cost_bps,
+            rerun_at_cost=lambda bps: run_vectorized_backtest(ctx.data_df, signal, cost_bps=bps).metrics,
+            rerun_with_code=lambda candidate: _rerun_single_with_code(candidate, ctx.data_df, cost_bps),
+            out_of_sample_data=ctx.data_df,
+            run_on_data=lambda data: _rerun_single_with_code(code, data, cost_bps) or {},
+            benchmark_returns=None,
+            turnover_annual=backtest.metrics.get("turnover_annual"),
+        )
+        ctx.review_report = review_report
+        run.save_json("review_report.json", review_report.to_dict())
+        new_warnings.extend(_review_warning_messages(review_report))
+        ctx.warnings.extend(new_warnings)
+        return {**backtest.metrics, "warnings": new_warnings, "review": review_report.to_dict()}
+
+    registry.register(
+        Skill(
+            "run_signal_backtest",
+            "Run revised fork signal code against the fixed parent data. No data fetching or universe changes are available.",
+            RUN_SIGNAL_BACKTEST_PARAMS,
+            _run_signal_backtest,
+        )
+    )
+    return registry
+
+
 def _message_to_dict(message: Any) -> dict:
     entry: dict[str, Any] = {"role": getattr(message, "role", "assistant"), "content": getattr(message, "content", None)}
     tool_calls = getattr(message, "tool_calls", None)
@@ -398,11 +449,16 @@ class Coordinator:
         run = self.run_store.create_run(user_request)
         return self.execute(run, user_request)
 
+    def run_fork(self, parent_run_id: str, modification_request: str) -> RunResult:
+        run = self.run_store.create_run(f"Fork {parent_run_id}: {modification_request}")
+        return self.execute_fork(run, parent_run_id, modification_request)
+
     def execute(
         self,
         run,
         user_request: str,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        parent_run_id: str | None = None,
     ) -> RunResult:
         """Drive the tool-use loop for an already-created Run.
 
@@ -420,6 +476,9 @@ class Coordinator:
         def emit(event: dict[str, Any]) -> None:
             if on_event is not None:
                 on_event(event)
+
+        if _is_library_question(user_request):
+            return self._execute_library_question(run, user_request, emit)
 
         ctx = _RunContext()
         registry = _build_registry(ctx, run)
@@ -478,6 +537,7 @@ class Coordinator:
             "data_path": reproduce_data_path,
             "cache": ctx.cache_meta,
             "universe": ctx.universe.to_dict() if ctx.universe else None,
+            "parent_run_id": parent_run_id,
         }
         run.save_config(config)
 
@@ -523,6 +583,7 @@ class Coordinator:
             summary=summary,
             metrics=metrics,
             review=ctx.review_report.to_dict() if ctx.review_report else None,
+            parent_run_id=parent_run_id,
         )
 
         return RunResult(
@@ -532,6 +593,190 @@ class Coordinator:
             warnings=ctx.warnings,
             summary=summary,
         )
+
+    def _execute_library_question(
+        self,
+        run,
+        user_request: str,
+        emit: Callable[[dict[str, Any]], None],
+    ) -> RunResult:
+        rows = summarize_library(ExperimentIndex.build())
+        aggregate_json = json.dumps(rows, ensure_ascii=False, indent=2, sort_keys=True)
+        messages: list[dict] = [
+            {
+                "role": "system",
+                "content": (
+                    "You answer QuantBench experiment-library questions. Any number, ranking, or comparison in your "
+                    "answer must come only from the injected aggregate table. Do not estimate or recount runs yourself. "
+                    "If a group has sample_warning=true, state that the sample is too small for a firm conclusion."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User question: {user_request}\n\n"
+                    "Deterministic aggregate table from quantbench.library.aggregate.summarize():\n"
+                    f"{aggregate_json}"
+                ),
+            },
+        ]
+        emit({"type": "start", "mode": "library_question"})
+        response = self.llm.chat(messages, tools=[])
+        message = response.choices[0].message
+        summary = message.content or ""
+        emit({"type": "final", "summary": summary})
+
+        config = {"hypothesis": user_request, "model": self.model, "library_question": True}
+        run.save_config(config)
+        run.save_json("library_summary.json", rows)
+        run.save_json("conversation.json", messages + [_message_to_dict(message)])
+        note = build_research_note(
+            run.run_id,
+            config,
+            {},
+            "sha256:none",
+            [],
+            summary,
+            "(实验库问答模式：未运行 Reviewer 审查)",
+        )
+        run.save_text("research_note.md", note)
+        run.finalize(
+            data_hash="sha256:none",
+            code_hash="sha256:none",
+            warnings=[],
+            model=self.model,
+            conversation_log="conversation.json",
+            summary=summary,
+            metrics={},
+            review=None,
+        )
+        return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics={}, warnings=[], summary=summary)
+
+    def execute_fork(
+        self,
+        run,
+        parent_run_id: str,
+        modification_request: str,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> RunResult:
+        seed_config = build_fork_config(parent_run_id, modification_request)
+
+        # v1 fork only supports single-symbol parents. A cross-sectional parent's
+        # data_path points at panel.parquet (a multi-symbol panel); feeding that
+        # into the single-symbol vectorized backtest below would silently produce
+        # garbage. Refuse explicitly rather than run the wrong math.
+        if seed_config.get("universe"):
+            raise ValueError(
+                f"Fork not supported for cross-sectional run {parent_run_id}: "
+                "forking multi-symbol (universe) experiments is not implemented yet. "
+                "Fork a single-symbol run instead."
+            )
+
+        data_path = Path(seed_config["data_path"]) if seed_config.get("data_path") else None
+
+        ctx = _RunContext()
+        ctx.cache_meta = seed_config.get("cache")
+        if data_path and data_path.exists():
+            fixed_df = pd.read_parquet(data_path)
+            ctx.data_path = data_path
+            ctx.data_df = fixed_df
+        else:
+            ctx.warnings.append("Fork parent data_path is missing; backtest cannot run until fixed data is available.")
+
+        registry = _build_fork_registry(ctx, run)
+
+        def emit(event: dict[str, Any]) -> None:
+            if on_event is not None:
+                on_event(event)
+
+        fork_prompt = (
+            f"This is a fork of {parent_run_id}. The data and universe are fixed and already loaded. "
+            "Only rewrite the compute() signal according to the user's modification. "
+            "Do not fetch data or change the universe.\n\n"
+            f"Modification request: {modification_request}\n\n"
+            "Parent signal code:\n"
+            f"{seed_config.get('parent_signal_code', '')}"
+        )
+        messages: list[dict] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": fork_prompt},
+        ]
+
+        emit({"type": "start", "parent_run_id": parent_run_id})
+        summary = ""
+        for _ in range(MAX_STEPS):
+            response = self.llm.chat(messages, tools=registry.schemas())
+            message = response.choices[0].message
+            messages.append(_message_to_dict(message))
+
+            tool_calls = getattr(message, "tool_calls", None)
+            if not tool_calls:
+                summary = message.content or ""
+                emit({"type": "final", "summary": summary})
+                break
+
+            for call in tool_calls:
+                name = call.function.name
+                try:
+                    args = json.loads(call.function.arguments or "{}")
+                except json.JSONDecodeError as exc:
+                    result: Any = {"error": f"invalid tool arguments JSON: {exc}"}
+                else:
+                    emit({"type": "tool_start", "tool": name, "args": args})
+                    try:
+                        result = registry.execute(name, args)
+                    except Exception as exc:
+                        result = {"error": f"{type(exc).__name__}: {exc}"}
+                run.log_step(name, args, result)
+                emit({"type": "tool_end", "tool": name, "result": result})
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, default=str)})
+        else:
+            summary = "Reached the step limit before the model produced a final answer."
+            ctx.warnings.append("Coordinator hit MAX_STEPS without a final natural-language answer.")
+            emit({"type": "final", "summary": summary})
+
+        metrics = ctx.last_metrics or {}
+        config = {
+            **{key: value for key, value in seed_config.items() if key != "parent_signal_code"},
+            "hypothesis": f"{seed_config.get('hypothesis', '')} | fork: {modification_request}",
+            "model": self.model,
+        }
+        run.save_config(config)
+
+        if data_path and data_path.exists():
+            data_hash = f"sha256:{file_sha256(data_path)}"
+        else:
+            data_hash = seed_config.get("parent_data_hash") or "sha256:none"
+        parent_hash = seed_config.get("parent_data_hash")
+        if parent_hash and data_hash != parent_hash:
+            ctx.warnings.append("Fork data drift: child data_hash differs from parent data_hash.")
+
+        code_path = run.run_dir / "signal.py"
+        code_hash = f"sha256:{file_sha256(code_path)}" if code_path.exists() else "sha256:none"
+        note = build_research_note(
+            run.run_id,
+            config,
+            metrics,
+            data_hash,
+            ctx.warnings,
+            summary,
+            ctx.review_report.to_markdown() if ctx.review_report else "",
+            _fork_lineage_markdown(parent_run_id, seed_config.get("parent_signal_code", ""), code_path, metrics),
+        )
+        run.save_text("research_note.md", note)
+        run.save_json("conversation.json", messages)
+        run.finalize(
+            data_hash=data_hash,
+            code_hash=code_hash,
+            warnings=ctx.warnings,
+            model=self.model,
+            conversation_log="conversation.json",
+            summary=summary,
+            metrics=metrics,
+            review=ctx.review_report.to_dict() if ctx.review_report else None,
+            parent_run_id=parent_run_id,
+        )
+        return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics=metrics, warnings=ctx.warnings, summary=summary)
 
 
 def _rerun_single_with_code(code: str, data_df, cost_bps: float) -> dict[str, float] | None:
@@ -572,6 +817,32 @@ def _fetch_benchmark_returns(fetch_params: dict[str, str] | None, current_df) ->
         return None
 
 
+def _is_library_question(user_request: str) -> bool:
+    """Detect a cross-run experiment-library question (vs. a request to run a
+    new backtest). Deliberately conservative: routing a real backtest request
+    into library-question mode would silently skip the backtest, so we only
+    match on phrases that clearly refer to the *existing* body of experiments,
+    not on common single words like "run"/"best" that appear in ordinary
+    backtest requests (e.g. "run a backtest to find the best momentum factor").
+    """
+    text = user_request.lower()
+    history_markers = (
+        "做过的所有",
+        "所有实验",
+        "实验库",
+        "实验历史",
+        "历史实验",
+        "过往实验",
+        "experiment library",
+        "past experiments",
+        "all experiments",
+        "across runs",
+        "my experiments",
+        "my runs",
+    )
+    return any(marker in text for marker in history_markers)
+
+
 def _review_warning_messages(review_report: ReviewReport) -> list[str]:
     messages: list[str] = []
     if review_report.verdict in {"WEAK", "REJECTED"}:
@@ -580,3 +851,35 @@ def _review_warning_messages(review_report: ReviewReport) -> list[str]:
         if finding.severity in {"critical", "warning"}:
             messages.append(f"Reviewer {finding.severity.upper()} [{finding.check}]: {finding.message}")
     return messages
+
+
+def _fork_lineage_markdown(parent_run_id: str, parent_signal_code: str, child_signal_path: Path, child_metrics: dict[str, float]) -> str:
+    parent_manifest = run_reader.read_manifest(parent_run_id) or {}
+    parent_metrics = parent_manifest.get("metrics") or {}
+    delta_lines = []
+    for key in ("sharpe", "annual_return", "max_drawdown", "turnover_annual", "ic_mean"):
+        before = parent_metrics.get(key)
+        after = child_metrics.get(key)
+        if before is None or after is None:
+            continue
+        delta_lines.append(f"- {key}: {before} → {after} (delta {after - before:+.4g})")
+
+    child_signal = child_signal_path.read_text(encoding="utf-8") if child_signal_path.exists() else ""
+    diff = "".join(
+        difflib.unified_diff(
+            parent_signal_code.splitlines(keepends=True),
+            child_signal.splitlines(keepends=True),
+            fromfile=f"{parent_run_id}/signal.py",
+            tofile="child/signal.py",
+        )
+    )
+    diff_block = f"\n```diff\n{diff[:4000]}\n```\n" if diff else "\n(信号代码无差异或不可用)\n"
+    return f"""## 谱系
+- 父 run: `{parent_run_id}`
+
+### 指标变化
+{chr(10).join(delta_lines) if delta_lines else "- 指标 delta 不可用"}
+
+### 信号 diff
+{diff_block}
+"""

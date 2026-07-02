@@ -10,12 +10,18 @@ from quantbench.api import run_reader
 from quantbench.api.run_manager import RunManager
 from quantbench.api.schemas import (
     ArtifactInfo,
+    ExperimentRecordSchema,
+    ForkRequest,
     NewRunRequest,
     NewRunResponse,
     RunDetail,
     RunSummary,
     StatusResponse,
 )
+from quantbench.library.aggregate import summarize
+from quantbench.library.compare import compare_runs
+from quantbench.library.index import ExperimentIndex, parse_csv_set
+from quantbench.library.lineage import lineage
 
 app = FastAPI(title="QuantBench API")
 
@@ -28,6 +34,40 @@ app.add_middleware(
 )
 
 _manager = RunManager()
+
+
+@app.get("/api/library", response_model=list[ExperimentRecordSchema])
+def get_library(
+    verdict: str | None = None,
+    asset: str | None = None,
+    factor_family: str | None = None,
+    min_sharpe: float | None = None,
+    sort: str = "created_at",
+) -> list[ExperimentRecordSchema]:
+    index = (
+        ExperimentIndex.build()
+        .filter(
+            verdicts=parse_csv_set(verdict),
+            asset_class=asset,
+            factor_family=factor_family,
+            min_sharpe=min_sharpe,
+        )
+        .sort(sort)
+    )
+    return [ExperimentRecordSchema(**record.to_dict()) for record in index.records]
+
+
+@app.get("/api/library/summary")
+def get_library_summary():
+    return summarize(ExperimentIndex.build())
+
+
+@app.get("/api/compare")
+def get_compare(run_ids: str):
+    ids = [run_id.strip() for run_id in run_ids.split(",") if run_id.strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="run_ids must not be empty")
+    return compare_runs(ids)
 
 
 @app.get("/api/runs", response_model=list[RunSummary])
@@ -95,6 +135,14 @@ def stream_run_events(run_id: str):
     return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
+@app.get("/api/runs/{run_id}/lineage")
+def get_lineage(run_id: str):
+    try:
+        return lineage(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run not found") from None
+
+
 @app.get("/api/runs/{run_id}/artifacts/{filename}")
 def get_artifact(run_id: str, filename: str):
     if ".." in filename:
@@ -118,3 +166,14 @@ def create_run(payload: NewRunRequest) -> NewRunResponse:
         raise HTTPException(status_code=400, detail="request must not be empty")
     run_id = _manager.submit(payload.request)
     return NewRunResponse(run_id=run_id, status="running")
+
+
+@app.post("/api/runs/{run_id}/fork", response_model=NewRunResponse)
+def fork_run(run_id: str, payload: ForkRequest) -> NewRunResponse:
+    if not payload.modification.strip():
+        raise HTTPException(status_code=400, detail="modification must not be empty")
+    try:
+        forked_run_id = _manager.fork(run_id, payload.modification)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="run not found") from None
+    return NewRunResponse(run_id=forked_run_id, status="running")
