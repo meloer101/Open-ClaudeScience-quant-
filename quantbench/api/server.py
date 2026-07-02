@@ -19,7 +19,7 @@ from quantbench.api.schemas import (
     StatusResponse,
 )
 from quantbench.library.aggregate import summarize
-from quantbench.library.compare import compare_runs
+from quantbench.library.compare import compare_runs, compute_returns_correlation
 from quantbench.library.index import ExperimentIndex, parse_csv_set
 from quantbench.library.lineage import lineage
 
@@ -67,7 +67,12 @@ def get_compare(run_ids: str):
     ids = [run_id.strip() for run_id in run_ids.split(",") if run_id.strip()]
     if not ids:
         raise HTTPException(status_code=400, detail="run_ids must not be empty")
-    return compare_runs(ids)
+    table = compare_runs(ids)
+    # A correlation matrix needs at least 2 runs to say anything; compute_runs_correlation()
+    # already returns a diagonal-only shape for fewer, so gate it here to avoid a misleading
+    # 1x1 "matrix" reaching the frontend.
+    table["returns_correlation"] = compute_returns_correlation(ids) if len(ids) >= 2 else {}
+    return table
 
 
 @app.get("/api/runs", response_model=list[RunSummary])
@@ -158,6 +163,19 @@ def get_artifact(run_id: str, filename: str):
         return FileResponse(path, media_type="application/octet-stream", filename=filename)
 
     return PlainTextResponse(path.read_text(encoding="utf-8", errors="replace"))
+
+
+@app.get("/api/runs/{run_id}/artifacts/{filename}/preview")
+def get_artifact_preview(run_id: str, filename: str):
+    if ".." in filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    if not filename.endswith(".parquet"):
+        raise HTTPException(status_code=400, detail="preview is only supported for .parquet artifacts")
+
+    preview = run_reader.preview_parquet(run_id, filename)
+    if preview is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    return preview
 
 
 @app.post("/api/runs", response_model=NewRunResponse)

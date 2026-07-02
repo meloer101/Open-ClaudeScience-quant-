@@ -172,6 +172,54 @@ def test_compare_runs_aligns_metrics_verdicts_and_findings(patched_runs):
     assert table["findings"]["run_20260701_000001_b"][0]["check"] == "lookahead"
 
 
+def _write_backtest_result(run_dir, returns, key="returns", start="2020-01-01"):
+    timestamps = pd.date_range(start, periods=len(returns), freq="D", tz="UTC")
+    payload = {
+        "metrics": {"sharpe": 1.0},
+        "series": {"timestamp": [str(ts) for ts in timestamps], key: list(returns)},
+    }
+    (run_dir / "backtest_result.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_compute_returns_correlation_aligns_by_timestamp_and_thresholds_overlap(patched_runs):
+    from quantbench.library.compare import compute_returns_correlation
+
+    rng = np.random.default_rng(0)
+    shared = rng.normal(0, 1, 60).tolist()
+
+    run_dir_a = _write_run(patched_runs, "run_20260701_000000_a")
+    _write_backtest_result(run_dir_a, shared)
+
+    # Identical series (perfect positive correlation) - mirrors a fork whose
+    # signal barely changed, so most of the return stream matches the parent.
+    run_dir_b = _write_run(patched_runs, "run_20260701_000001_b")
+    _write_backtest_result(run_dir_b, shared)
+
+    # Cross-sectional run keys its series "long_short_returns" instead of
+    # "returns" - unrelated (random) values, and overlapping on fewer than
+    # MIN_CORRELATION_OBSERVATIONS timestamps by starting later.
+    run_dir_c = _write_run(patched_runs, "run_20260701_000002_c", universe={"provider": "sp500"})
+    _write_backtest_result(
+        run_dir_c, rng.normal(0, 1, 10).tolist(), key="long_short_returns", start="2020-02-25"
+    )
+
+    # No backtest_result.json at all.
+    _write_run(patched_runs, "run_20260701_000003_d")
+
+    matrix = compute_returns_correlation(
+        ["run_20260701_000000_a", "run_20260701_000001_b", "run_20260701_000002_c", "run_20260701_000003_d"]
+    )
+
+    assert matrix["run_20260701_000000_a"]["run_20260701_000000_a"] == 1.0
+    assert matrix["run_20260701_000000_a"]["run_20260701_000001_b"] == pytest.approx(1.0)
+    assert matrix["run_20260701_000001_b"]["run_20260701_000000_a"] == pytest.approx(1.0)
+    # Too few overlapping observations with run_c -> null, not a noisy number.
+    assert matrix["run_20260701_000000_a"]["run_20260701_000002_c"] is None
+    # No backtest_result.json for run_d at all -> null, including on its own diagonal.
+    assert matrix["run_20260701_000003_d"]["run_20260701_000003_d"] is None
+    assert matrix["run_20260701_000000_a"]["run_20260701_000003_d"] is None
+
+
 def test_lineage_returns_ordered_chain_signal_diff_and_metric_delta(patched_runs):
     from quantbench.library.lineage import lineage
 

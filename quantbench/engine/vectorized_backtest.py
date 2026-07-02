@@ -19,6 +19,7 @@ class BacktestResult:
     equity_curve: pd.Series
     drawdown: pd.Series
     position: pd.Series
+    turnover: pd.Series
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +30,7 @@ class BacktestResult:
                 "equity_curve": self.equity_curve.round(10).tolist(),
                 "drawdown": self.drawdown.round(10).tolist(),
                 "position": self.position.fillna(0).round(6).tolist(),
+                "turnover": self.turnover.reindex(self.returns.index).fillna(0).round(6).tolist(),
             },
         }
 
@@ -51,6 +53,7 @@ def run_vectorized_backtest(price_df: pd.DataFrame, signal: pd.Series, cost_bps:
     net_returns = gross_returns - turnover * cost_bps / 10000
     net_returns.index = timestamps
     position.index = timestamps
+    turnover.index = timestamps
 
     equity_curve = (1 + net_returns.fillna(0)).cumprod()
     drawdown = compute_drawdown(equity_curve)
@@ -67,6 +70,7 @@ def run_vectorized_backtest(price_df: pd.DataFrame, signal: pd.Series, cost_bps:
         equity_curve=equity_curve,
         drawdown=drawdown,
         position=position,
+        turnover=turnover,
     )
 
 

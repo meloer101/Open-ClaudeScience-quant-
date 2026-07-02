@@ -72,6 +72,15 @@ def test_vectorized_backtest_returns_metrics_and_curves():
     assert len(result.equity_curve) == len(df)
     assert len(result.drawdown) == len(df)
 
+    # Phase 4: the single-symbol path used to only persist turnover_annual
+    # (a scalar), which meant the Web UI had no way to render a turnover
+    # chart for single-symbol runs even though the per-period series was
+    # already computed in-memory. It must now round-trip through
+    # to_json_dict() the same way the cross-sectional path already does.
+    payload = result.to_json_dict()
+    assert len(payload["series"]["turnover"]) == len(df)
+    assert all(value >= 0 for value in payload["series"]["turnover"])
+
 
 def test_fetch_ohlcv_marks_synthetic_fallback_and_persists_across_cache_hits(tmp_path, monkeypatch):
     from quantbench.data import exchange

@@ -129,6 +129,48 @@ def test_get_artifact_rejects_path_traversal(tmp_path, client):
     assert response.status_code in (400, 404)
 
 
+def test_get_artifact_preview_returns_first_rows_of_parquet(tmp_path, client):
+    import pandas as pd
+
+    run_dir = _write_fake_completed_run(tmp_path)
+    frame = pd.DataFrame({"symbol": [f"SYM{i}" for i in range(250)], "value": range(250)})
+    frame.to_parquet(run_dir / "panel.parquet")
+
+    response = client.get("/api/runs/run_20260701_000000_aaaa/artifacts/panel.parquet/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["columns"] == ["symbol", "value"]
+    assert len(body["rows"]) == 200
+    assert body["rows"][0] == {"symbol": "SYM0", "value": 0}
+    assert body["total_rows"] == 250
+    assert body["truncated"] is True
+
+
+def test_get_artifact_preview_404_for_missing_file(tmp_path, client):
+    _write_fake_completed_run(tmp_path)
+
+    response = client.get("/api/runs/run_20260701_000000_aaaa/artifacts/does_not_exist.parquet/preview")
+
+    assert response.status_code == 404
+
+
+def test_get_artifact_preview_rejects_non_parquet(tmp_path, client):
+    _write_fake_completed_run(tmp_path)
+
+    response = client.get("/api/runs/run_20260701_000000_aaaa/artifacts/research_note.md/preview")
+
+    assert response.status_code == 400
+
+
+def test_get_artifact_preview_rejects_path_traversal(tmp_path, client):
+    _write_fake_completed_run(tmp_path)
+
+    response = client.get("/api/runs/run_20260701_000000_aaaa/artifacts/..%2F..%2Fetc%2Fpasswd/preview")
+
+    assert response.status_code in (400, 404)
+
+
 def test_list_runs_shows_request_and_today_for_in_progress_run(tmp_path, client):
     """A run still in progress has no manifest.json yet - user_request and
     created_at must still show up (from request.txt / the run_id itself)
@@ -308,6 +350,15 @@ def test_library_api_summary_compare_and_lineage(tmp_path, client):
     compare_response = client.get("/api/compare?run_ids=run_20260701_000000_a,run_20260701_000001_b")
     assert compare_response.status_code == 200
     assert compare_response.json()["metrics"]["sharpe"]["run_20260701_000001_b"] == 1.4
+    # Phase 4: /api/compare also carries a returns_correlation matrix. Neither
+    # fixture run has a backtest_result.json, so every cell must be null
+    # (missing data), not a fabricated number - and the key must still exist
+    # so the frontend doesn't have to special-case its absence.
+    correlation = compare_response.json()["returns_correlation"]
+    assert correlation["run_20260701_000000_a"]["run_20260701_000001_b"] is None
+
+    single_run_compare = client.get("/api/compare?run_ids=run_20260701_000000_a")
+    assert single_run_compare.json()["returns_correlation"] == {}
 
     lineage_response = client.get("/api/runs/run_20260701_000001_b/lineage")
     assert lineage_response.status_code == 200

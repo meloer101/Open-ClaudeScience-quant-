@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yaml
 
 from quantbench.config import RUNS_DIR
@@ -131,6 +132,36 @@ def read_error(run_id: str) -> str | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8")).get("traceback")
+
+
+def read_backtest_result(run_id: str) -> dict[str, Any] | None:
+    path = run_dir_for(run_id) / "backtest_result.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+PARQUET_PREVIEW_ROW_LIMIT = 200
+
+
+def preview_parquet(run_id: str, filename: str) -> dict[str, Any] | None:
+    """First PARQUET_PREVIEW_ROW_LIMIT rows of a run's .parquet artifact as
+    JSON-safe records, mirroring the existing "first 200 rows, download for
+    the rest" convention the web CSV viewer already uses (ArtifactInspector.tsx
+    CsvTable). Returns None if the file doesn't exist so the caller can 404."""
+    path = run_dir_for(run_id) / filename
+    if not path.is_file():
+        return None
+    frame = pd.read_parquet(path)
+    total_rows = len(frame)
+    preview = frame.head(PARQUET_PREVIEW_ROW_LIMIT)
+    records = json.loads(preview.to_json(orient="records", date_format="iso"))
+    return {
+        "columns": [str(column) for column in frame.columns],
+        "rows": records,
+        "total_rows": total_rows,
+        "truncated": total_rows > PARQUET_PREVIEW_ROW_LIMIT,
+    }
 
 
 def list_artifacts(run_id: str) -> list[dict[str, Any]]:
