@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from quantbench.api import run_reader
 from quantbench.api.run_manager import RunManager
@@ -77,6 +79,20 @@ def get_run_status(run_id: str) -> StatusResponse:
         return StatusResponse(status=run_reader.get_status(run_id))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="run not found") from None
+
+
+@app.get("/api/runs/{run_id}/events")
+def stream_run_events(run_id: str):
+    """Server-Sent Events stream of live tool-call progress for a run still
+    executing in this process. If the run isn't being live-tracked (already
+    finished, or the API restarted since it was submitted), the stream just
+    ends immediately - the frontend falls back to polling /status either way."""
+
+    def event_source():
+        for event in _manager.stream_events(run_id):
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
 @app.get("/api/runs/{run_id}/artifacts/{filename}")

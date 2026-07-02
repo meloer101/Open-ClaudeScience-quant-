@@ -195,6 +195,60 @@ def test_create_run_starts_in_background_and_completes(tmp_path, monkeypatch):
     assert detail["metrics"]
 
 
+def test_stream_run_events_emits_tool_lifecycle_events(tmp_path, monkeypatch):
+    from _fakes import FakeLLMClient
+
+    monkeypatch.setattr("quantbench.api.run_reader.RUNS_DIR", tmp_path)
+    monkeypatch.setattr("quantbench.data.cache.DATA_CACHE_DIR", tmp_path / "data_cache")
+    monkeypatch.setattr(
+        "quantbench.agent.coordinator.LLMClient",
+        lambda model: FakeLLMClient(
+            [
+                ("tools", [("fetch_ohlcv", {"symbol": "BTC/USDT", "timeframe": "4h", "start": "2023-01-01", "end": "2023-02-01"})]),
+                ("tools", [("run_signal_backtest", {"code": "def compute(df):\n    return df['close'].pct_change().fillna(0.0)\n", "cost_bps": 5})]),
+                ("text", "done"),
+            ]
+        ),
+    )
+
+    import quantbench.api.run_manager as run_manager_mod
+    from quantbench.artifact.store import ArtifactStore
+
+    monkeypatch.setattr(run_manager_mod, "RUNS_DIR", tmp_path)
+    from quantbench.api import server as server_mod
+
+    server_mod._manager = run_manager_mod.RunManager(run_store=ArtifactStore(tmp_path))
+    test_client = TestClient(server_mod.app)
+
+    response = test_client.post("/api/runs", json={"request": "测试一个简单信号"})
+    run_id = response.json()["run_id"]
+
+    events = []
+    with test_client.stream("GET", f"/api/runs/{run_id}/events") as stream:
+        for line in stream.iter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[len("data: ") :]))
+            if events and events[-1].get("type") == "final":
+                break
+
+    types = [e["type"] for e in events]
+    assert types == ["start", "tool_start", "tool_end", "tool_start", "tool_end", "final"]
+    assert events[1]["tool"] == "fetch_ohlcv"
+    assert events[3]["tool"] == "run_signal_backtest"
+    assert "sharpe" in events[4]["result"]
+    assert events[-1]["summary"] == "done"
+
+
+def test_stream_run_events_ends_immediately_for_untracked_run(tmp_path, monkeypatch):
+    monkeypatch.setattr("quantbench.api.run_reader.RUNS_DIR", tmp_path)
+    from quantbench.api.server import app
+
+    test_client = TestClient(app)
+    with test_client.stream("GET", "/api/runs/some_unknown_run/events") as stream:
+        lines = list(stream.iter_lines())
+    assert lines == []
+
+
 def test_create_run_rejects_empty_request(client):
     response = client.post("/api/runs", json={"request": "   "})
     assert response.status_code == 400

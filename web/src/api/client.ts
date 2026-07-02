@@ -34,3 +34,7 @@ export function createRun(userRequest: string): Promise<{ run_id: string; status
 export function artifactUrl(runId: string, filename: string): string {
   return `/api/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(filename)}`;
 }
+
+export function runEventsUrl(runId: string): string {
+  return `/api/runs/${encodeURIComponent(runId)}/events`;
+}

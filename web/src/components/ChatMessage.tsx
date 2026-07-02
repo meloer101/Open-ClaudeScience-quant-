@@ -1,10 +1,12 @@
 import Markdown from "react-markdown";
-import type { RunDetail } from "../types";
+import type { RunDetail, RunEvent } from "../types";
 import { WarningBanner } from "./WarningBanner";
 import { ArtifactGallery } from "./ArtifactGallery";
+import { LiveProgress } from "./LiveProgress";
 
 interface ChatMessageProps {
   run: RunDetail;
+  liveEvents: RunEvent[];
   selectedFilename: string | null;
   onSelectArtifact: (filename: string) => void;
 }
@@ -28,7 +30,7 @@ function MetricsTable({ metrics }: { metrics: Record<string, number> }) {
   );
 }
 
-export function ChatMessage({ run, selectedFilename, onSelectArtifact }: ChatMessageProps) {
+export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifact }: ChatMessageProps) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -38,12 +40,7 @@ export function ChatMessage({ run, selectedFilename, onSelectArtifact }: ChatMes
       </div>
 
       <div className="max-w-3xl">
-        {run.status === "running" && (
-          <div className="text-sm text-slate-500 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            正在运行，请稍候…
-          </div>
-        )}
+        {run.status === "running" && <LiveProgress events={liveEvents} />}
         {run.status === "failed" && (
           <div className="border-2 border-red-400 bg-red-50 rounded-lg p-3 text-sm text-red-800">
             <div className="font-bold mb-1">运行失败</div>

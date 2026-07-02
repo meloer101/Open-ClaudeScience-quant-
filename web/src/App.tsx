@@ -1,53 +1,122 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listRuns, createRun, getRun } from "./api/client";
-import type { ArtifactInfo } from "./types";
+import { useRunEvents } from "./hooks/useRunEvents";
 import { Sidebar } from "./components/Sidebar";
+import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
 import { ChatPane } from "./components/ChatPane";
-import { ArtifactInspector } from "./components/ArtifactInspector";
+import { ArtifactInspector, type OpenArtifactTab } from "./components/ArtifactInspector";
+
+const DRAFT_ID = "draft";
+
+function artifactKey(runId: string, filename: string): string {
+  return `${runId}::${filename}`;
+}
 
 function App() {
   const queryClient = useQueryClient();
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedArtifact, setSelectedArtifact] = useState<ArtifactInfo | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [openArtifactTabs, setOpenArtifactTabs] = useState<OpenArtifactTab[]>([]);
+  const [activeArtifactKey, setActiveArtifactKey] = useState<string | null>(null);
 
-  const { data: runs = [], isLoading } = useQuery({
+  const { data: runs = [], isLoading: isRunsLoading } = useQuery({
     queryKey: ["runs"],
     queryFn: listRuns,
     refetchInterval: 3000,
   });
 
   useEffect(() => {
-    if (!selectedRunId && runs.length > 0) {
-      setSelectedRunId(runs[0].run_id);
+    if (openTabs.length === 0 && runs.length > 0) {
+      setOpenTabs([runs[0].run_id]);
+      setActiveTabId(runs[0].run_id);
     }
-  }, [runs, selectedRunId]);
+  }, [runs, openTabs.length]);
 
-  // Single source of truth for the selected run's detail (including its
-  // artifact list) - kept reactive via useQuery so a click right after
-  // selecting a run always sees fresh data, instead of reading a stale
-  // snapshot out of the cache during render.
+  const isDraftActive = activeTabId === DRAFT_ID;
+  const activeRunId = isDraftActive ? null : activeTabId;
+
   const { data: currentRun, isLoading: isRunLoading } = useQuery({
-    queryKey: ["run", selectedRunId],
-    queryFn: () => getRun(selectedRunId!),
-    enabled: Boolean(selectedRunId),
+    queryKey: ["run", activeRunId],
+    queryFn: () => getRun(activeRunId!),
+    enabled: Boolean(activeRunId),
     refetchInterval: (query) => (query.state.data?.status === "running" ? 1000 : false),
   });
 
-  const handleSelectArtifact = (filename: string) => {
-    const artifact = currentRun?.artifacts.find((item) => item.filename === filename) ?? null;
-    setSelectedArtifact(artifact);
+  const liveEvents = useRunEvents(activeRunId, currentRun?.status === "running");
+
+  const sessionTabs: SessionTab[] = openTabs.map((id) => {
+    if (id === DRAFT_ID) {
+      return { id, label: "New session", status: "draft" };
+    }
+    const summary = runs.find((run) => run.run_id === id);
+    return {
+      id,
+      label: summary?.user_request || id,
+      status: summary?.status ?? "running",
+    };
+  });
+
+  const selectTab = (id: string) => {
+    setActiveTabId(id);
   };
 
-  const handleNew = () => {
-    setSelectedRunId(null);
-    setSelectedArtifact(null);
+  const openRunTab = (runId: string) => {
+    setOpenTabs((prev) => (prev.includes(runId) ? prev : [...prev, runId]));
+    setActiveTabId(runId);
+  };
+
+  const handleNewTab = () => {
+    if (openTabs.includes(DRAFT_ID)) {
+      setActiveTabId(DRAFT_ID);
+      return;
+    }
+    setOpenTabs((prev) => [...prev, DRAFT_ID]);
+    setActiveTabId(DRAFT_ID);
+  };
+
+  const closeTab = (id: string) => {
+    setOpenTabs((prev) => {
+      const index = prev.indexOf(id);
+      const next = prev.filter((tabId) => tabId !== id);
+      if (activeTabId === id) {
+        const fallback = next[index - 1] ?? next[0] ?? null;
+        setActiveTabId(fallback);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectArtifact = (filename: string) => {
+    if (!activeRunId || !currentRun) return;
+    const artifact = currentRun.artifacts.find((item) => item.filename === filename);
+    if (!artifact) return;
+    const key = artifactKey(activeRunId, filename);
+    setOpenArtifactTabs((prev) => (prev.some((tab) => tab.key === key) ? prev : [...prev, { key, runId: activeRunId, artifact }]));
+    setActiveArtifactKey(key);
+  };
+
+  const closeArtifactTab = (key: string) => {
+    setOpenArtifactTabs((prev) => {
+      const index = prev.findIndex((tab) => tab.key === key);
+      const next = prev.filter((tab) => tab.key !== key);
+      if (activeArtifactKey === key) {
+        const fallback = next[index - 1] ?? next[0] ?? null;
+        setActiveArtifactKey(fallback?.key ?? null);
+      }
+      return next;
+    });
   };
 
   const handleSubmit = async (request: string) => {
     const { run_id } = await createRun(request);
-    setSelectedRunId(run_id);
-    setSelectedArtifact(null);
+    setOpenTabs((prev) => {
+      if (activeTabId && prev.includes(activeTabId) && (activeTabId === DRAFT_ID || activeTabId === run_id)) {
+        return prev.map((id) => (id === activeTabId ? run_id : id));
+      }
+      return [...prev, run_id];
+    });
+    setActiveTabId(run_id);
     await queryClient.invalidateQueries({ queryKey: ["runs"] });
   };
 
@@ -55,26 +124,33 @@ function App() {
     <div className="h-screen w-screen flex">
       <Sidebar
         runs={runs}
-        selectedRunId={selectedRunId}
-        onSelect={(id) => {
-          setSelectedRunId(id);
-          setSelectedArtifact(null);
-        }}
-        onNew={handleNew}
-        isLoading={isLoading}
+        selectedRunId={activeRunId}
+        onSelect={openRunTab}
+        onNew={handleNewTab}
+        isLoading={isRunsLoading}
       />
-      <ChatPane
-        run={currentRun ?? null}
-        isLoading={Boolean(selectedRunId) && isRunLoading}
-        selectedFilename={selectedArtifact?.filename ?? null}
-        onSelectArtifact={handleSelectArtifact}
-        onSubmit={handleSubmit}
-      />
-      <ArtifactInspector
-        runId={selectedRunId}
-        artifact={selectedArtifact}
-        onClose={() => setSelectedArtifact(null)}
-      />
+      <div className="flex-1 flex flex-col min-w-0">
+        <SessionTabBar tabs={sessionTabs} activeId={activeTabId} onSelect={selectTab} onClose={closeTab} />
+        <div className="flex-1 flex min-h-0">
+          <ChatPane
+            run={currentRun ?? null}
+            isLoading={Boolean(activeRunId) && isRunLoading}
+            isDraft={isDraftActive || openTabs.length === 0}
+            liveEvents={liveEvents}
+            selectedFilename={
+              activeArtifactKey ? openArtifactTabs.find((tab) => tab.key === activeArtifactKey)?.artifact.filename ?? null : null
+            }
+            onSelectArtifact={handleSelectArtifact}
+            onSubmit={handleSubmit}
+          />
+          <ArtifactInspector
+            tabs={openArtifactTabs}
+            activeKey={activeArtifactKey}
+            onSelectTab={setActiveArtifactKey}
+            onCloseTab={closeArtifactTab}
+          />
+        </div>
+      </div>
     </div>
   );
 }

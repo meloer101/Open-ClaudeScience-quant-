@@ -35,3 +35,10 @@ export interface RunDetail {
   artifacts: ArtifactInfo[];
   error: string | null;
 }
+
+export type RunEvent =
+  | { type: "start" }
+  | { type: "tool_start"; tool: string; args: Record<string, unknown> }
+  | { type: "tool_end"; tool: string; result: unknown }
+  | { type: "final"; summary: string }
+  | { type: "error"; message: string };

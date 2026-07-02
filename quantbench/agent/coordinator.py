@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -358,14 +359,29 @@ class Coordinator:
         run = self.run_store.create_run(user_request)
         return self.execute(run, user_request)
 
-    def execute(self, run, user_request: str) -> RunResult:
+    def execute(
+        self,
+        run,
+        user_request: str,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> RunResult:
         """Drive the tool-use loop for an already-created Run.
 
         Split out from `run()` so callers that need the run_id before execution
         finishes (e.g. the web API, which returns run_id immediately and runs
         the loop in a background thread) can call `run_store.create_run(...)`
         themselves first, then hand the Run object here.
+
+        `on_event`, if given, is called synchronously with a small dict at each
+        step (tool call start/end, final answer) - purely an observation hook
+        for live progress streaming (see quantbench/api). It never influences
+        the loop's own logic or control flow.
         """
+
+        def emit(event: dict[str, Any]) -> None:
+            if on_event is not None:
+                on_event(event)
+
         ctx = _RunContext()
         registry = _build_registry(ctx, run)
 
@@ -374,6 +390,7 @@ class Coordinator:
             {"role": "user", "content": user_request},
         ]
 
+        emit({"type": "start"})
         summary = ""
         for _ in range(MAX_STEPS):
             response = self.llm.chat(messages, tools=registry.schemas())
@@ -383,6 +400,7 @@ class Coordinator:
             tool_calls = getattr(message, "tool_calls", None)
             if not tool_calls:
                 summary = message.content or ""
+                emit({"type": "final", "summary": summary})
                 break
 
             for call in tool_calls:
@@ -392,17 +410,20 @@ class Coordinator:
                 except json.JSONDecodeError as exc:
                     result: Any = {"error": f"invalid tool arguments JSON: {exc}"}
                 else:
+                    emit({"type": "tool_start", "tool": name, "args": args})
                     try:
                         result = registry.execute(name, args)
                     except Exception as exc:
                         result = {"error": f"{type(exc).__name__}: {exc}"}
                 run.log_step(name, args, result)
+                emit({"type": "tool_end", "tool": name, "result": result})
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, default=str)}
                 )
         else:
             summary = "Reached the step limit before the model produced a final answer."
             ctx.warnings.append("Coordinator hit MAX_STEPS without a final natural-language answer.")
+            emit({"type": "final", "summary": summary})
 
         panel_path = run.run_dir / "panel.parquet"
         if ctx.cross_sectional and panel_path.exists():
