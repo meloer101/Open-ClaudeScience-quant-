@@ -8,6 +8,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_CACHE_DIR = PROJECT_ROOT / "data_cache"
 RUNS_DIR = PROJECT_ROOT / "runs"
+FACTORS_DIR = PROJECT_ROOT / "factors"
+SKILL_DOCS_DIR = PROJECT_ROOT / "skills_docs"
 DEFAULT_COST_BPS = 5.0
 DEFAULT_MODEL = "deepseek/deepseek-chat"
 MAX_STEPS = 12

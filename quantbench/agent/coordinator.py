@@ -12,6 +12,7 @@ from quantbench.agent.prompts import SYSTEM_PROMPT
 from quantbench.api import run_reader
 from quantbench.artifact.store import ArtifactStore
 from quantbench.config import DEFAULT_COST_BPS, DEFAULT_MODEL, MAX_STEPS, RUNS_DIR
+from quantbench.config import SKILL_DOCS_DIR as DEFAULT_SKILL_DOCS_DIR
 from quantbench.data.cache import file_sha256
 from quantbench.data.exchange import SYNTHETIC_FALLBACK_SOURCE, fetch_ohlcv
 from quantbench.data.universe import UniverseDefinition, build_universe
@@ -20,9 +21,13 @@ from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backt
 from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
 from quantbench.review import ReviewReport, run_review
+from quantbench.factors.parametrize import apply_overrides
+from quantbench.factors.store import FactorStore
 from quantbench.library.aggregate import summarize as summarize_library
 from quantbench.library.fork import build_fork_config
 from quantbench.library.index import ExperimentIndex
+from quantbench.skilldocs.inject import build_augmented_system_prompt
+from quantbench.skilldocs.registry import SkillRegistryDocs
 from quantbench.skills.codeexec import load_signal_function, run_signal_code
 from quantbench.skills.data_quality import DataQualityReport, validate_universe_data
 from quantbench.skills.plot import save_drawdown_plot, save_equity_curve_plot, save_group_returns_plot, save_ic_plot
@@ -201,6 +206,7 @@ class _RunContext:
         self.warnings: list[str] = []
         self.fetch_params: dict[str, str] | None = None
         self.review_report: ReviewReport | None = None
+        self.injected_skills: list[str] = []
 
 
 def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
@@ -468,9 +474,43 @@ class Coordinator:
         self.run_store = run_store or ArtifactStore(RUNS_DIR)
         self.llm = llm or LLMClient(self.model)
 
-    def run(self, user_request: str) -> RunResult:
+    def run(self, user_request: str, *, skill_names: list[str] | None = None) -> RunResult:
         run = self.run_store.create_run(user_request)
-        return self.execute(run, user_request)
+        return self.execute(run, user_request, skill_names=skill_names)
+
+    def run_from_factor(
+        self,
+        factor_name: str,
+        param_overrides: dict[str, str] | None,
+        request: str,
+        *,
+        skill_names: list[str] | None = None,
+        factor_store: FactorStore | None = None,
+    ) -> RunResult:
+        store = factor_store or FactorStore()
+        factor = store.load_factor(factor_name)
+        code = apply_overrides(factor.code, param_overrides or {})
+        limitations = "\n".join(
+            f"- {finding.get('severity')} [{finding.get('check')}]: {finding.get('message')}"
+            for finding in factor.source_findings
+        ) or "- none recorded"
+        seed_request = (
+            f"Use factor-library entry `{factor.name}` as the starting point for this run.\n"
+            f"Source run: {factor.source_run_id}; source verdict: {factor.source_verdict}.\n"
+            f"Known limitations from reviewer findings:\n{limitations}\n\n"
+            "Starting signal code after requested parameter overrides:\n"
+            f"```python\n{code}\n```\n\n"
+            "Run the normal QuantBench workflow for this new request. You may revise the code if the new data or scenario requires it.\n"
+            f"User request: {request}"
+        )
+        run = self.run_store.create_run(f"Factor {factor_name}: {request}")
+        return self.execute(
+            run,
+            request,
+            skill_names=skill_names,
+            derived_from_factor=factor_name,
+            prompt_override=seed_request,
+        )
 
     def run_fork(self, parent_run_id: str, modification_request: str) -> RunResult:
         run = self.run_store.create_run(f"Fork {parent_run_id}: {modification_request}")
@@ -482,6 +522,9 @@ class Coordinator:
         user_request: str,
         on_event: Callable[[dict[str, Any]], None] | None = None,
         parent_run_id: str | None = None,
+        skill_names: list[str] | None = None,
+        derived_from_factor: str | None = None,
+        prompt_override: str | None = None,
     ) -> RunResult:
         """Drive the tool-use loop for an already-created Run.
 
@@ -494,6 +537,17 @@ class Coordinator:
         step (tool call start/end, final answer) - purely an observation hook
         for live progress streaming (see quantbench/api). It never influences
         the loop's own logic or control flow.
+
+        `prompt_override`, if given, replaces `user_request` only as the
+        content of the first LLM message (e.g. run_from_factor's seed prompt,
+        which embeds reference code and reviewer findings). `user_request`
+        itself stays the clean human request text everywhere else - it's what
+        `config.yaml`'s `hypothesis` records, what the experiment library's
+        factor_family classifier reads, and what Skill matching runs against.
+        Matching Skills against a prompt stuffed with factor code and finding
+        text would risk spurious keyword hits unrelated to the user's actual
+        intent, and "hypothesis" showing a code blob instead of the request
+        would make the experiment library unreadable.
         """
 
         def emit(event: dict[str, Any]) -> None:
@@ -505,10 +559,13 @@ class Coordinator:
 
         ctx = _RunContext()
         registry = _build_registry(ctx, run)
+        matched_skills = _select_skill_docs(user_request, skill_names)
+        ctx.injected_skills = [skill.name for skill in matched_skills]
+        system_prompt = build_augmented_system_prompt(SYSTEM_PROMPT, matched_skills)
 
         messages: list[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_request},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_override or user_request},
         ]
 
         emit({"type": "start"})
@@ -561,6 +618,8 @@ class Coordinator:
             "cache": ctx.cache_meta,
             "universe": ctx.universe.to_dict() if ctx.universe else None,
             "parent_run_id": parent_run_id,
+            "derived_from_factor": derived_from_factor,
+            "injected_skills": ctx.injected_skills,
         }
         run.save_config(config)
 
@@ -607,6 +666,7 @@ class Coordinator:
             metrics=metrics,
             review=ctx.review_report.to_dict() if ctx.review_report else None,
             parent_run_id=parent_run_id,
+            injected_skills=ctx.injected_skills,
         )
 
         return RunResult(
@@ -800,6 +860,21 @@ class Coordinator:
             parent_run_id=parent_run_id,
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics=metrics, warnings=ctx.warnings, summary=summary)
+
+
+def _select_skill_docs(user_request: str, skill_names: list[str] | None) -> list:
+    registry = SkillRegistryDocs(DEFAULT_SKILL_DOCS_DIR)
+    selected = []
+    seen = set()
+    for name in skill_names or []:
+        doc = registry.get(name)
+        selected.append(doc)
+        seen.add(doc.name)
+    for doc in registry.match(user_request):
+        if doc.name not in seen:
+            selected.append(doc)
+            seen.add(doc.name)
+    return selected
 
 
 def _rerun_single_with_code(code: str, data_df, cost_bps: float) -> dict[str, float] | None:

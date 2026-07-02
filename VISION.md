@@ -334,19 +334,14 @@ class UniverseDefinition:
 | `cost_sensitivity` | backtest_result, cost_range | 敏感性分析 |
 | `regime_analysis` | returns, market_data | Regime 分解 |
 
-### 用户自定义技能
+### 用户自定义沉淀：因子库与 Workflow Skills
 
-用户可以将任何 pipeline 保存为可复用技能：
+当前实现把“可复用沉淀”拆成两套独立机制，避免把具体因子代码误做成固定 tool：
 
-```python
-@quantbench.skill("my_momentum_factor")
-def compute_momentum(data, lookback=24, vol_filter=True):
-    """我的动量因子：带成交量过滤的价格动量"""
-    # ... 用户代码 ...
-    return factor_values
-```
+- **Factor Library（已实现，详见 [PHASE6.md](PHASE6.md)）**：`factor save/list/show/use` 会把已跑通且经 Reviewer 审查的 `compute(df)` 因子代码保存为本地 JSON 档案，连同参数、source verdict、指标和 Reviewer findings 一起快照。默认拒绝收藏 `REJECTED` run，`--force` 可覆盖但会保留 `saved_from_rejected` 标记。`factor use` 会把因子代码作为可修改起点注入正常 Coordinator 流程，并在 config 中记录 `derived_from_factor`。
+- **Workflow Skills（已实现，详见 [PHASE7.md](PHASE7.md)）**：`skills_docs/*.md` 存放带 `name`/`description`/`triggers` frontmatter 的工作流规范，启动 run 时按触发词匹配并追加到 system prompt，也支持 `--skill <name>` 显式注入。每次 run 的 manifest 记录 `injected_skills`，保证影响模型行为的上下文可审计。
 
-保存后，未来所有 session 自动可用。
+这两者都不是新增可调用函数：因子库保存的是可复制修改的代码档案；Workflow Skills 保存的是“怎么做这类研究”的指导文档。
 
 ---
 
@@ -426,7 +421,7 @@ def compute_momentum(data, lookback=24, vol_filter=True):
 **目标：扩展到更多市场和更复杂的研究**
 
 - [ ] 多 agent 协作（研究 agent + 审查 agent 并行）
-- [ ] 自定义 skill 系统
+- [x] 自定义沉淀系统：Factor Library + Workflow Skills（两套独立机制）
 - [ ] 组合优化
 - [x] 多资产支持（crypto 截面补全：当前成交量 Top-N USDT 永续合约 universe、BTC/USDT benchmark 路由、funding rate 未建模警告）
 - [ ] 期货支持（推迟：需要连续合约/展期规则，详见 [PHASE5.md](PHASE5.md) 第一节和第五节）
