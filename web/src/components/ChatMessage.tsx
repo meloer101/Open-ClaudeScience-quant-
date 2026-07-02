@@ -32,8 +32,19 @@ function MetricsTable({ metrics }: { metrics: Record<string, number> }) {
   );
 }
 
+// Historical cross-sectional runs wrote their result under this name before
+// it was unified with the single-symbol path's "backtest_result.json" (see
+// run_reader.read_backtest_result on the backend, which resolves either).
+// The gate for showing the Interactive Charts entry point must recognize
+// both names too, or it silently hides the entry point for exactly the runs
+// the backend fallback exists to support.
+const LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME = "cross_sectional_backtest_result.json";
+
 export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifact, onOpenCharts, isChartsSelected }: ChatMessageProps) {
-  const hasBacktestResult = run.artifacts.some((artifact) => artifact.filename === "backtest_result.json");
+  const hasBacktestResult = run.artifacts.some(
+    (artifact) =>
+      artifact.filename === "backtest_result.json" || artifact.filename === LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME,
+  );
   return (
     <div className="space-y-4">
       <div className="flex justify-end">

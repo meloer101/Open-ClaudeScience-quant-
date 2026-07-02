@@ -148,6 +148,20 @@ def get_lineage(run_id: str):
         raise HTTPException(status_code=404, detail="run not found") from None
 
 
+@app.get("/api/runs/{run_id}/backtest-result")
+def get_backtest_result(run_id: str):
+    """The ChartsPanel's one entry point for a run's backtest result JSON.
+    Deliberately not a direct artifact-by-filename fetch: single-symbol runs
+    write "backtest_result.json" but historical cross-sectional runs wrote
+    "cross_sectional_backtest_result.json" before the two were unified onto
+    one name - run_reader.read_backtest_result() resolves either, so the
+    frontend never has to know or guess which filename a given run used."""
+    result = run_reader.read_backtest_result(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="backtest result not found")
+    return result
+
+
 @app.get("/api/runs/{run_id}/artifacts/{filename}")
 def get_artifact(run_id: str, filename: str):
     if ".." in filename:

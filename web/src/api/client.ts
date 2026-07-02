@@ -87,8 +87,15 @@ async function fetchArtifactJson<T>(runId: string, filename: string): Promise<T 
   return response.json() as Promise<T>;
 }
 
-export function getBacktestResult(runId: string): Promise<BacktestResultPayload | null> {
-  return fetchArtifactJson<BacktestResultPayload>(runId, "backtest_result.json");
+export async function getBacktestResult(runId: string): Promise<BacktestResultPayload | null> {
+  // Not a direct artifact-by-filename fetch: some historical cross-sectional
+  // runs wrote a different filename before it was unified with the
+  // single-symbol path (see run_reader.read_backtest_result on the backend).
+  // This endpoint resolves either name so the frontend never has to guess.
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/backtest-result`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json() as Promise<BacktestResultPayload>;
 }
 
 export function getReviewReport(runId: string): Promise<ReviewReportPayload | null> {

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import yaml
 
 from quantbench.config import RUNS_DIR
@@ -134,11 +136,21 @@ def read_error(run_id: str) -> str | None:
     return json.loads(path.read_text(encoding="utf-8")).get("traceback")
 
 
+# Cross-sectional runs used to write this result under a different filename
+# than the single-symbol path ("cross_sectional_backtest_result.json" vs
+# "backtest_result.json") before the two were unified onto one canonical name.
+# Historical run directories on disk still have the old name and are valid
+# project history - readers must keep resolving it, not just new writers.
+_LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME = "cross_sectional_backtest_result.json"
+
+
 def read_backtest_result(run_id: str) -> dict[str, Any] | None:
-    path = run_dir_for(run_id) / "backtest_result.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    run_dir = run_dir_for(run_id)
+    for filename in ("backtest_result.json", _LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME):
+        path = run_dir / filename
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    return None
 
 
 PARQUET_PREVIEW_ROW_LIMIT = 200
@@ -148,16 +160,37 @@ def preview_parquet(run_id: str, filename: str) -> dict[str, Any] | None:
     """First PARQUET_PREVIEW_ROW_LIMIT rows of a run's .parquet artifact as
     JSON-safe records, mirroring the existing "first 200 rows, download for
     the rest" convention the web CSV viewer already uses (ArtifactInspector.tsx
-    CsvTable). Returns None if the file doesn't exist so the caller can 404."""
+    CsvTable). Returns None if the file doesn't exist so the caller can 404.
+
+    Uses pyarrow directly rather than pandas.read_parquet(path).head(n): a
+    universe panel.parquet can hold years of daily bars for hundreds of
+    symbols, and reading the whole thing into memory just to preview 200 rows
+    would scale with total file size instead of the preview size. Row count
+    comes from Parquet metadata (no data read at all), and only as many row
+    groups as needed to reach the row limit are decoded."""
     path = run_dir_for(run_id) / filename
     if not path.is_file():
         return None
-    frame = pd.read_parquet(path)
-    total_rows = len(frame)
-    preview = frame.head(PARQUET_PREVIEW_ROW_LIMIT)
+
+    parquet_file = pq.ParquetFile(path)
+    total_rows = parquet_file.metadata.num_rows
+    columns = [str(name) for name in parquet_file.schema_arrow.names]
+
+    batches = []
+    collected_rows = 0
+    for batch in parquet_file.iter_batches(batch_size=PARQUET_PREVIEW_ROW_LIMIT):
+        batches.append(batch)
+        collected_rows += batch.num_rows
+        if collected_rows >= PARQUET_PREVIEW_ROW_LIMIT:
+            break
+
+    if batches:
+        preview = pa.Table.from_batches(batches).to_pandas().head(PARQUET_PREVIEW_ROW_LIMIT)
+    else:
+        preview = pd.DataFrame(columns=columns)
     records = json.loads(preview.to_json(orient="records", date_format="iso"))
     return {
-        "columns": [str(column) for column in frame.columns],
+        "columns": columns,
         "rows": records,
         "total_rows": total_rows,
         "truncated": total_rows > PARQUET_PREVIEW_ROW_LIMIT,
