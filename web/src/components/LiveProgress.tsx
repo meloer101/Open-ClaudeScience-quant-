@@ -5,6 +5,7 @@ const TOOL_LABEL: Record<string, string> = {
   run_signal_backtest: "跑单标的回测",
   build_universe: "构建 universe",
   run_cross_sectional_backtest: "跑截面回测",
+  screen_factors: "批量筛选因子",
 };
 
 function describeArgs(args: Record<string, unknown>): string {

@@ -1,6 +1,8 @@
 import difflib
 import json
 import threading
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +14,8 @@ from quantbench.agent.llm import LLMClient
 from quantbench.agent.prompts import SYSTEM_PROMPT
 from quantbench.api import run_reader
 from quantbench.artifact.store import ArtifactStore
-from quantbench.config import DEFAULT_COST_BPS, DEFAULT_MODEL, MAX_STEPS, RUNS_DIR
+from quantbench.config import CRITIC_MODEL, DEFAULT_COST_BPS, DEFAULT_MODEL, MAX_STEPS, RUNS_DIR
+from quantbench.config import SCREEN_MAX_CANDIDATES, SCREEN_MAX_WORKERS
 from quantbench.config import SKILL_DOCS_DIR as DEFAULT_SKILL_DOCS_DIR
 from quantbench.data.cache import file_sha256
 from quantbench.data.exchange import SYNTHETIC_FALLBACK_SOURCE, fetch_ohlcv
@@ -21,7 +24,7 @@ from quantbench.data.warehouse import fetch_universe_ohlcv
 from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backtest
 from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
-from quantbench.review import ReviewReport, run_review
+from quantbench.review import CriticReport, ReviewReport, run_critic, run_review
 from quantbench.factors.parametrize import apply_overrides
 from quantbench.factors.store import FactorStore
 from quantbench.library.aggregate import summarize as summarize_library
@@ -194,6 +197,30 @@ RUN_CROSS_SECTIONAL_BACKTEST_PARAMS = {
     "required": ["code", "start", "end"],
 }
 
+SCREEN_FACTORS_PARAMS = {
+    "type": "object",
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "description": "Candidate factor list, each item containing name and causal compute() code.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "code": {"type": "string"},
+                },
+                "required": ["name", "code"],
+            },
+        },
+        "start": {"type": "string", "description": "YYYY-MM-DD"},
+        "end": {"type": "string", "description": "YYYY-MM-DD"},
+        "timeframe": {"type": "string", "description": "Use 1d for US equities."},
+        "n_groups": {"type": "integer", "description": "Number of factor groups, default 10."},
+        "cost_bps": {"type": "number", "description": "Round-trip trading cost in basis points. Default 5."},
+    },
+    "required": ["candidates", "start", "end"],
+}
+
 
 CRYPTO_PERPETUAL_FUNDING_WARNING = (
     "Crypto perpetual backtests do not model funding rate carry cost. Long-short "
@@ -218,10 +245,13 @@ class _RunContext:
         self.warnings: list[str] = []
         self.fetch_params: dict[str, str] | None = None
         self.review_report: ReviewReport | None = None
+        self.critic_report: CriticReport | None = None
         self.injected_skills: list[str] = []
+        self.cost_bps: float | None = None
+        self.screened = False
 
 
-def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
+def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm, model: str) -> SkillRegistry:
     registry = SkillRegistry()
 
     def _fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> dict:
@@ -250,6 +280,12 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
         }
 
     def _run_signal_backtest(code: str, cost_bps: float = DEFAULT_COST_BPS) -> dict:
+        if ctx.screened:
+            return {
+                "error": "screen_factors already produced final, complete results for this session "
+                "(backtest + Reviewer + Critic per candidate). Do not re-run individual backtests to "
+                "re-verify or spot-check - report the screen_factors result directly in your final answer."
+            }
         if ctx.data_df is None:
             return {"error": "no market data loaded yet - call fetch_ohlcv first"}
 
@@ -258,6 +294,7 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
 
         ctx.signal_code = code
         ctx.last_metrics = backtest.metrics
+        ctx.cost_bps = cost_bps
         run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
         run.save_json("backtest_result.json", backtest.to_json_dict())
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
@@ -312,6 +349,12 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
         n_groups: int = 10,
         cost_bps: float = DEFAULT_COST_BPS,
     ) -> dict:
+        if ctx.screened:
+            return {
+                "error": "screen_factors already produced final, complete results for this session "
+                "(backtest + Reviewer + Critic per candidate). Do not re-run individual backtests to "
+                "re-verify or spot-check - report the screen_factors result directly in your final answer."
+            }
         if ctx.universe is None:
             return {"error": "no universe loaded yet - call build_universe first"}
 
@@ -342,6 +385,7 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
 
         ctx.signal_code = code
         ctx.last_metrics = backtest.metrics
+        ctx.cost_bps = cost_bps
         panel_path = run.run_dir / "panel.parquet"
         panel.to_parquet(panel_path, index=False)
         run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
@@ -389,6 +433,79 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
             "review": review_report.to_dict(),
         }
 
+    def _screen_factors(
+        candidates: list[dict[str, str]],
+        start: str,
+        end: str,
+        timeframe: str = "1d",
+        n_groups: int = 10,
+        cost_bps: float = DEFAULT_COST_BPS,
+    ) -> dict:
+        if ctx.universe is None:
+            return {"error": "no universe loaded yet - call build_universe first"}
+        if not isinstance(candidates, list) or not (1 <= len(candidates) <= SCREEN_MAX_CANDIDATES):
+            return {"error": f"candidates must contain between 1 and {SCREEN_MAX_CANDIDATES} items"}
+
+        normalized = []
+        for index, candidate in enumerate(candidates):
+            name = str(candidate.get("name") or f"candidate_{index + 1}")
+            code = str(candidate.get("code") or "")
+            if not code.strip():
+                return {"error": f"candidate {name} has empty code"}
+            normalized.append({"name": name, "code": code})
+
+        panel, cache_meta = fetch_universe_ohlcv(ctx.universe, timeframe, start, end)
+        # Fetched once up front rather than per-candidate: all candidates share the same
+        # universe/date range/timeframe, so the benchmark series is identical for every
+        # one of them. Fetching it once also avoids N threads racing an identical
+        # cache-miss fetch and avoids a transient fetch failure giving some candidates a
+        # beta check against real data and others against none.
+        benchmark_symbol = _benchmark_symbol_for_asset(ctx.universe.asset_class)
+        benchmark_returns = _fetch_benchmark_returns(
+            {"symbol": benchmark_symbol, "timeframe": timeframe, "start": start, "end": end}, None
+        )
+        summary_items: list[dict[str, Any]] = []
+        max_workers = min(len(normalized), SCREEN_MAX_WORKERS)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(
+                    _run_screen_candidate,
+                    run_store,
+                    critic_llm,
+                    model,
+                    run.run_id,
+                    ctx.universe,
+                    panel,
+                    cache_meta,
+                    candidate,
+                    start,
+                    end,
+                    timeframe,
+                    n_groups,
+                    cost_bps,
+                    benchmark_returns,
+                )
+                for candidate in normalized
+            ]
+            for future in as_completed(futures):
+                summary_items.append(future.result())
+
+        summary_items.sort(key=_screen_sort_key, reverse=True)
+        payload = {
+            "parent_run_id": run.run_id,
+            "universe": ctx.universe.to_dict(),
+            "start": start,
+            "end": end,
+            "timeframe": timeframe,
+            "n_groups": n_groups,
+            "cost_bps": cost_bps,
+            "critic_model": str(getattr(critic_llm, "model", CRITIC_MODEL)),
+            "candidates": summary_items,
+        }
+        run.save_json("factor_screen_summary.json", payload)
+        ctx.screened = True
+        return payload
+
     registry.register(
         Skill("fetch_ohlcv", "Fetch and cache OHLCV market data.", FETCH_OHLCV_PARAMS, _fetch_ohlcv)
     )
@@ -411,6 +528,14 @@ def _build_registry(ctx: _RunContext, run) -> SkillRegistry:
             _run_cross_sectional_backtest,
         )
     )
+    registry.register(
+        Skill(
+            "screen_factors",
+            "Batch-screen multiple causal cross-sectional factor candidates against the current universe.",
+            SCREEN_FACTORS_PARAMS,
+            _screen_factors,
+        )
+    )
     return registry
 
 
@@ -426,6 +551,7 @@ def _build_fork_registry(ctx: _RunContext, run) -> SkillRegistry:
 
         ctx.signal_code = code
         ctx.last_metrics = backtest.metrics
+        ctx.cost_bps = cost_bps
         run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
         run.save_json("backtest_result.json", backtest.to_json_dict())
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
@@ -475,16 +601,234 @@ def _message_to_dict(message: Any) -> dict:
     return entry
 
 
+def _run_critic_for_context(ctx: _RunContext, run, critic_llm, summary: str, context: dict[str, Any]) -> CriticReport | None:
+    if ctx.review_report is None or not ctx.signal_code:
+        return None
+    critic_report = run_critic(
+        critic_llm,
+        code=ctx.signal_code,
+        review_report=ctx.review_report,
+        metrics=ctx.last_metrics or {},
+        summary=summary,
+        context=context,
+    )
+    ctx.critic_report = critic_report
+    run.save_json("critic_report.json", critic_report.to_dict())
+    if critic_report.status == "ok" and critic_report.agrees_with_deterministic_verdict is False:
+        deterministic = ctx.review_report.verdict
+        ctx.warnings.append(
+            "Critic Agent 独立复核认为应为 "
+            f"{critic_report.verdict}，与确定性 verdict（{deterministic}）不一致：{critic_report.critique[:200]}"
+        )
+    return critic_report
+
+
+def _critic_context(ctx: _RunContext) -> dict[str, Any]:
+    context: dict[str, Any] = {"cost_bps": ctx.cost_bps}
+    if ctx.universe is not None:
+        context.update(
+            {
+                "asset_class": ctx.universe.asset_class,
+                "universe": ctx.universe.name,
+                "symbols": len(ctx.universe.symbols),
+            }
+        )
+    if ctx.fetch_params:
+        context.update(ctx.fetch_params)
+        context["asset_class"] = "crypto" if "/" in ctx.fetch_params.get("symbol", "") else "equity"
+    return context
+
+
+def _run_screen_candidate(
+    run_store: ArtifactStore,
+    critic_llm,
+    model: str,
+    parent_run_id: str,
+    universe: UniverseDefinition,
+    panel: pd.DataFrame,
+    cache_meta: dict[str, Any],
+    candidate: dict[str, str],
+    start: str,
+    end: str,
+    timeframe: str,
+    n_groups: int,
+    cost_bps: float,
+    benchmark_returns: Any,
+) -> dict[str, Any]:
+    child = run_store.create_run(f"Screen factor {candidate['name']} from {parent_run_id}")
+    critic_model = str(getattr(critic_llm, "model", CRITIC_MODEL))
+    ctx = _RunContext()
+    ctx.universe = universe
+    ctx.panel_df = panel
+    ctx.cache_meta = cache_meta
+    ctx.cross_sectional = True
+    ctx.signal_code = candidate["code"]
+    ctx.cost_bps = cost_bps
+    # Written before the risky calls below so a candidate that fails mid-backtest
+    # still leaves its code and parent linkage on disk - screen_factors expects
+    # per-candidate failures, and library/lineage only read parent_run_id from
+    # config.yaml/manifest.json, never from error.json.
+    child.save_code("signal.py", SIGNAL_FILE_HEADER + candidate["code"] + SIGNAL_FILE_HARNESS)
+    child.save_config(
+        {
+            "hypothesis": f"Screen factor {candidate['name']}",
+            "model": model,
+            "critic_model": critic_model,
+            "universe": universe.to_dict(),
+            "parent_run_id": parent_run_id,
+            "screen_candidate": candidate["name"],
+        }
+    )
+    try:
+        ctx.data_quality = validate_universe_data(panel, universe, end=end)
+        compute = load_signal_function(candidate["code"])
+        backtest = run_cross_sectional_backtest(panel, compute, n_groups=n_groups, cost_bps=cost_bps)
+        ctx.last_metrics = backtest.metrics
+
+        panel_path = child.run_dir / "panel.parquet"
+        panel.to_parquet(panel_path, index=False)
+        child.save_json("backtest_result.json", backtest.to_json_dict())
+        child.save_json("data_quality_report.json", ctx.data_quality.to_dict())
+        save_equity_curve_plot(backtest.equity_curve, child.run_dir / "equity_curve.png")
+        save_drawdown_plot(backtest.drawdown, child.run_dir / "drawdown.png")
+        save_group_returns_plot(backtest.group_returns, child.run_dir / "group_returns.png")
+        save_ic_plot(backtest.ic_series, child.run_dir / "rank_ic.png")
+
+        benchmark_symbol = _benchmark_symbol_for_asset(universe.asset_class)
+        review_report = run_review(
+            code=candidate["code"],
+            returns=backtest.returns,
+            cost_bps=cost_bps,
+            rerun_at_cost=lambda bps: run_cross_sectional_backtest(panel, compute, n_groups=n_groups, cost_bps=bps).metrics,
+            rerun_with_code=lambda code: _rerun_cross_with_code(code, panel, n_groups, cost_bps),
+            out_of_sample_data=panel,
+            run_on_data=lambda data: _rerun_cross_with_code(candidate["code"], data, n_groups, cost_bps) or {},
+            benchmark_returns=benchmark_returns,
+            benchmark_symbol=benchmark_symbol,
+            factor_panel=backtest.factor_panel,
+            n_groups=n_groups,
+            turnover_annual=backtest.metrics.get("turnover_annual"),
+        )
+        ctx.review_report = review_report
+        child.save_json("review_report.json", review_report.to_dict())
+        ctx.warnings.extend(_review_warning_messages(review_report))
+
+        summary = (
+            f"Screened factor {candidate['name']}: deterministic verdict {review_report.verdict}, "
+            f"Sharpe {backtest.metrics.get('sharpe')}."
+        )
+        _run_critic_for_context(
+            ctx,
+            child,
+            critic_llm,
+            summary,
+            {
+                "asset_class": universe.asset_class,
+                "universe": universe.name,
+                "symbols": len(universe.symbols),
+                "cost_bps": cost_bps,
+                "start": start,
+                "end": end,
+                "timeframe": timeframe,
+            },
+        )
+        data_hash = f"sha256:{file_sha256(panel_path)}"
+        code_path = child.run_dir / "signal.py"
+        code_hash = f"sha256:{file_sha256(code_path)}"
+        config = {
+            "hypothesis": f"Screen factor {candidate['name']}",
+            "model": model,
+            "critic_model": critic_model,
+            "data_path": str(panel_path),
+            "cache": cache_meta,
+            "universe": universe.to_dict(),
+            "parent_run_id": parent_run_id,
+            "screen_candidate": candidate["name"],
+        }
+        child.save_config(config)
+        note = build_cross_sectional_research_note(
+            child.run_id,
+            config,
+            backtest.metrics,
+            data_hash,
+            ctx.warnings,
+            summary,
+            ctx.data_quality.to_dict(),
+            review_report.to_markdown(),
+            ctx.critic_report.to_markdown() if ctx.critic_report else "",
+        )
+        child.save_text("research_note.md", note)
+        child.save_json("conversation.json", [])
+        child.finalize(
+            data_hash=data_hash,
+            code_hash=code_hash,
+            warnings=ctx.warnings,
+            model=model,
+            critic_model=critic_model,
+            conversation_log="conversation.json",
+            summary=summary,
+            metrics=backtest.metrics,
+            review=review_report.to_dict(),
+            critic=ctx.critic_report.to_dict() if ctx.critic_report else None,
+            parent_run_id=parent_run_id,
+        )
+        return _screen_item(candidate["name"], child.run_id, "completed", backtest.metrics, review_report, ctx.critic_report)
+    except Exception as exc:
+        child.save_json("error.json", {"traceback": traceback.format_exc()})
+        return {
+            "name": candidate["name"],
+            "run_id": child.run_id,
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "verdict": None,
+            "critic_verdict": None,
+            "critic_agrees": None,
+            "sharpe": None,
+        }
+
+
+def _screen_item(
+    name: str,
+    run_id: str,
+    status: str,
+    metrics: dict[str, Any],
+    review_report: ReviewReport,
+    critic_report: CriticReport | None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "run_id": run_id,
+        "status": status,
+        "verdict": review_report.verdict,
+        "critic_verdict": critic_report.verdict if critic_report else None,
+        "critic_agrees": critic_report.agrees_with_deterministic_verdict if critic_report else None,
+        "sharpe": metrics.get("sharpe"),
+    }
+
+
+def _screen_sort_key(item: dict[str, Any]) -> tuple[int, float]:
+    verdict_rank = {"STRONG": 4, "PROMISING": 3, "WEAK": 2, "REJECTED": 1}
+    sharpe = item.get("sharpe")
+    try:
+        sharpe_value = float(sharpe)
+    except (TypeError, ValueError):
+        sharpe_value = float("-inf")
+    return (verdict_rank.get(str(item.get("verdict") or ""), 0), sharpe_value)
+
+
 class Coordinator:
     def __init__(
         self,
         model: str | None = None,
         run_store: ArtifactStore | None = None,
         llm: LLMClient | None = None,
+        critic_llm: LLMClient | None = None,
     ):
         self.model = model or DEFAULT_MODEL
         self.run_store = run_store or ArtifactStore(RUNS_DIR)
         self.llm = llm or LLMClient(self.model)
+        self.critic_llm = critic_llm or LLMClient(CRITIC_MODEL)
+        self.critic_model = str(getattr(self.critic_llm, "model", CRITIC_MODEL))
 
     def run(self, user_request: str, *, skill_names: list[str] | None = None) -> RunResult:
         run = self.run_store.create_run(user_request)
@@ -571,7 +915,7 @@ class Coordinator:
             return self._execute_library_question(run, user_request, emit)
 
         ctx = _RunContext()
-        registry = _build_registry(ctx, run)
+        registry = _build_registry(ctx, run, self.run_store, self.critic_llm, self.model)
         matched_skills = _select_skill_docs(user_request, skill_names)
         ctx.injected_skills = [skill.name for skill in matched_skills]
         system_prompt = build_augmented_system_prompt(SYSTEM_PROMPT, matched_skills)
@@ -635,6 +979,7 @@ class Coordinator:
         config = {
             "hypothesis": user_request,
             "model": self.model,
+            "critic_model": self.critic_model,
             "data_path": reproduce_data_path,
             "cache": ctx.cache_meta,
             "universe": ctx.universe.to_dict() if ctx.universe else None,
@@ -654,6 +999,8 @@ class Coordinator:
         code_path = run.run_dir / "signal.py"
         code_hash = f"sha256:{file_sha256(code_path)}" if code_path.exists() else "sha256:none"
 
+        _run_critic_for_context(ctx, run, self.critic_llm, summary, _critic_context(ctx))
+
         if ctx.cross_sectional:
             note = build_cross_sectional_research_note(
                 run.run_id,
@@ -664,6 +1011,7 @@ class Coordinator:
                 summary,
                 ctx.data_quality.to_dict() if ctx.data_quality else None,
                 ctx.review_report.to_markdown() if ctx.review_report else "",
+                ctx.critic_report.to_markdown() if ctx.critic_report else "",
             )
         else:
             note = build_research_note(
@@ -674,6 +1022,7 @@ class Coordinator:
                 ctx.warnings,
                 summary,
                 ctx.review_report.to_markdown() if ctx.review_report else "",
+                ctx.critic_report.to_markdown() if ctx.critic_report else "",
             )
         run.save_text("research_note.md", note)
         run.save_json("conversation.json", messages)
@@ -682,10 +1031,12 @@ class Coordinator:
             code_hash=code_hash,
             warnings=ctx.warnings,
             model=self.model,
+            critic_model=self.critic_model,
             conversation_log="conversation.json",
             summary=summary,
             metrics=metrics,
             review=ctx.review_report.to_dict() if ctx.review_report else None,
+            critic=ctx.critic_report.to_dict() if ctx.critic_report else None,
             parent_run_id=parent_run_id,
             injected_skills=ctx.injected_skills,
         )
@@ -730,7 +1081,12 @@ class Coordinator:
         summary = message.content or ""
         emit({"type": "final", "summary": summary})
 
-        config = {"hypothesis": user_request, "model": self.model, "library_question": True}
+        config = {
+            "hypothesis": user_request,
+            "model": self.model,
+            "critic_model": self.critic_model,
+            "library_question": True,
+        }
         run.save_config(config)
         run.save_json("library_summary.json", rows)
         run.save_json("conversation.json", messages + [_message_to_dict(message)])
@@ -742,6 +1098,7 @@ class Coordinator:
             [],
             summary,
             "(实验库问答模式：未运行 Reviewer 审查)",
+            "(实验库问答模式：未运行 Critic Agent 独立复核)",
         )
         run.save_text("research_note.md", note)
         run.finalize(
@@ -749,6 +1106,7 @@ class Coordinator:
             code_hash="sha256:none",
             warnings=[],
             model=self.model,
+            critic_model=self.critic_model,
             conversation_log="conversation.json",
             summary=summary,
             metrics={},
@@ -853,6 +1211,7 @@ class Coordinator:
             **{key: value for key, value in seed_config.items() if key != "parent_signal_code"},
             "hypothesis": f"{seed_config.get('hypothesis', '')} | fork: {modification_request}",
             "model": self.model,
+            "critic_model": self.critic_model,
         }
         run.save_config(config)
 
@@ -866,6 +1225,7 @@ class Coordinator:
 
         code_path = run.run_dir / "signal.py"
         code_hash = f"sha256:{file_sha256(code_path)}" if code_path.exists() else "sha256:none"
+        _run_critic_for_context(ctx, run, self.critic_llm, summary, _critic_context(ctx))
         note = build_research_note(
             run.run_id,
             config,
@@ -874,6 +1234,7 @@ class Coordinator:
             ctx.warnings,
             summary,
             ctx.review_report.to_markdown() if ctx.review_report else "",
+            ctx.critic_report.to_markdown() if ctx.critic_report else "",
             _fork_lineage_markdown(parent_run_id, seed_config.get("parent_signal_code", ""), code_path, metrics),
         )
         run.save_text("research_note.md", note)
@@ -883,10 +1244,12 @@ class Coordinator:
             code_hash=code_hash,
             warnings=ctx.warnings,
             model=self.model,
+            critic_model=self.critic_model,
             conversation_log="conversation.json",
             summary=summary,
             metrics=metrics,
             review=ctx.review_report.to_dict() if ctx.review_report else None,
+            critic=ctx.critic_report.to_dict() if ctx.critic_report else None,
             parent_run_id=parent_run_id,
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics=metrics, warnings=ctx.warnings, summary=summary)

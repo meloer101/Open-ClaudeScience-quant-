@@ -55,6 +55,8 @@ export interface ExperimentRecord {
   ic_mean: number | null;
   oos_sharpe: number | null;
   verdict: string | null;
+  critic_verdict: string | null;
+  critic_agrees: boolean | null;
   critical_count: number;
   warning_count: number;
   parent_run_id: string | null;

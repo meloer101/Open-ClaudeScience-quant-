@@ -49,6 +49,11 @@ function VerdictBadge({ verdict }: { verdict: string | null }) {
   return <span className={`px-1.5 py-0.5 rounded text-[10px] leading-none ${tone}`}>{verdict ?? "NONE"}</span>;
 }
 
+function CriticDisagreementBadge({ agrees }: { agrees: boolean | null }) {
+  if (agrees !== false) return null;
+  return <span className="px-1.5 py-0.5 rounded text-[10px] leading-none bg-danger-50 text-danger-600">CRITIC</span>;
+}
+
 function fmt(value: number | null): string {
   if (value === null) return "";
   return value.toFixed(2);
@@ -144,7 +149,10 @@ export function Sidebar({
                   {record.asset_class} · {record.factor_family} · {fmt(record.sharpe)}
                 </span>
               </button>
-              <VerdictBadge verdict={record.verdict} />
+              <div className="flex items-center gap-1">
+                <VerdictBadge verdict={record.verdict} />
+                <CriticDisagreementBadge agrees={record.critic_agrees} />
+              </div>
             </div>
           ))}
           {libraryRecords.length === 0 && <div className="px-2 py-2 text-xs text-warm-400">No matching runs.</div>}

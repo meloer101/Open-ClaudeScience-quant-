@@ -9,6 +9,7 @@ def build_research_note(
     warnings: list[str] | None = None,
     summary: str = "",
     review_markdown: str = "",
+    critic_markdown: str = "",
     lineage_markdown: str = "",
 ) -> str:
     warnings = warnings or []
@@ -51,6 +52,9 @@ def build_research_note(
 ## Reviewer 审查报告
 {review_markdown or "(未运行 Reviewer 审查)"}
 
+## Critic Agent 独立复核
+{critic_markdown or "(未运行 Critic Agent 独立复核)"}
+
 {lineage_markdown}
 
 ## Coordinator 总结
@@ -74,6 +78,7 @@ def build_cross_sectional_research_note(
     summary: str = "",
     data_quality: dict | None = None,
     review_markdown: str = "",
+    critic_markdown: str = "",
     lineage_markdown: str = "",
 ) -> str:
     warnings = warnings or []
@@ -134,6 +139,9 @@ def build_cross_sectional_research_note(
 
 ## Reviewer 审查报告
 {review_markdown or "(未运行 Reviewer 审查)"}
+
+## Critic Agent 独立复核
+{critic_markdown or "(未运行 Critic Agent 独立复核)"}
 
 {lineage_markdown}
 

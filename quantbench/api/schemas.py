@@ -56,6 +56,8 @@ class ExperimentRecordSchema(BaseModel):
     ic_mean: float | None = None
     oos_sharpe: float | None = None
     verdict: str | None = None
+    critic_verdict: str | None = None
+    critic_agrees: bool | None = None
     critical_count: int
     warning_count: int
     parent_run_id: str | None = None

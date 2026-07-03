@@ -420,7 +420,7 @@ class UniverseDefinition:
 ### Phase 5: 多资产与高级功能 (Week 11-14)
 **目标：扩展到更多市场和更复杂的研究**
 
-- [ ] 多 agent 协作（研究 agent + 审查 agent 并行）
+- [x] 多 agent 协作（独立 Critic Agent + 批量因子筛选流水线，详见 [PHASE8.md](PHASE8.md)——"研究 agent + 审查 agent 并行"字面意思在确定性 Reviewer 架构下不成立，重新定义为独立 LLM 复核 + 跨候选因子并发）
 - [x] 自定义沉淀系统：Factor Library + Workflow Skills（两套独立机制）
 - [ ] 组合优化
 - [x] 多资产支持（crypto 截面补全：当前成交量 Top-N USDT 永续合约 universe、BTC/USDT benchmark 路由、funding rate 未建模警告）
@@ -428,7 +428,7 @@ class UniverseDefinition:
 - [ ] Paper trading 集成
 - [ ] 远程计算支持（SSH / Modal）
 
-**当前状态（详细计划见 [PHASE5.md](PHASE5.md)）：** Phase 5 先只补齐 crypto 截面研究，而不是一次性吞下期货、多 agent、组合优化等所有高级能力。系统现在可以构建当前按 24h 成交量排名的 Top-N USDT 永续合约 universe，明确标注这不是 point-in-time universe；截面 Reviewer 的 beta exposure 会按资产类别路由，crypto 使用 BTC/USDT，equity 仍使用 SPY；crypto 永续合约 run 会自动写入 funding rate carry cost 未建模的警告。期货支持没有打勾，后续需要先单独设计 continuous contract 和 roll 规则。
+**当前状态（详细计划见 [PHASE5.md](PHASE5.md)、[PHASE8.md](PHASE8.md)）：** Phase 5 先只补齐 crypto 截面研究，而不是一次性吞下期货、多 agent、组合优化等所有高级能力。系统现在可以构建当前按 24h 成交量排名的 Top-N USDT 永续合约 universe，明确标注这不是 point-in-time universe；截面 Reviewer 的 beta exposure 会按资产类别路由，crypto 使用 BTC/USDT，equity 仍使用 SPY；crypto 永续合约 run 会自动写入 funding rate carry cost 未建模的警告。期货支持没有打勾，后续需要先单独设计 continuous contract 和 roll 规则。多 agent 协作已按 PHASE8.md 落地：每次 run 结束时新增一个独立 LLM Critic 调用，只看确定性证据（Reviewer 结果+回测指标+ Coordinator 最终陈述），核对叙述一致性并给出独立 verdict；`screen_factors` 工具让一次请求并发筛选多个候选因子，每个候选各自触发 Critic。
 
 ### Phase 6: 生产化 (Week 15+)
 - [ ] Live signal monitoring

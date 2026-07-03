@@ -13,6 +13,8 @@ SKILL_DOCS_DIR = PROJECT_ROOT / "skills_docs"
 DEFAULT_COST_BPS = 5.0
 DEFAULT_MODEL = "deepseek/deepseek-chat"
 MAX_STEPS = 12
+SCREEN_MAX_CANDIDATES = 20
+SCREEN_MAX_WORKERS = 4
 
 
 def _load_dotenv() -> None:
@@ -28,3 +30,4 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+CRITIC_MODEL = os.environ.get("QUANTBENCH_CRITIC_MODEL", DEFAULT_MODEL)

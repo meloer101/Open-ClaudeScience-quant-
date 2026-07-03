@@ -35,6 +35,8 @@ class ExperimentRecord:
     ic_mean: float | None
     oos_sharpe: float | None
     verdict: str | None
+    critic_verdict: str | None
+    critic_agrees: bool | None
     critical_count: int
     warning_count: int
     parent_run_id: str | None
@@ -50,6 +52,7 @@ def build_record(run_id: str) -> ExperimentRecord:
     status = run_reader.get_status(run_id)
     metrics = manifest.get("metrics") or {}
     review = manifest.get("review") or _read_review_report(run_id) or {}
+    critic = manifest.get("critic") or _read_critic_report(run_id) or {}
     findings = review.get("findings") or []
     parent_run_id = manifest.get("parent_run_id") or config.get("parent_run_id")
     hypothesis = config.get("hypothesis") or manifest.get("user_request") or run_reader.read_user_request(run_id)
@@ -69,6 +72,8 @@ def build_record(run_id: str) -> ExperimentRecord:
         ic_mean=_number_or_none(metrics.get("ic_mean")),
         oos_sharpe=_extract_oos_sharpe(findings),
         verdict=review.get("verdict"),
+        critic_verdict=critic.get("verdict"),
+        critic_agrees=critic.get("agrees_with_deterministic_verdict"),
         critical_count=sum(1 for finding in findings if str(finding.get("severity", "")).lower() == "critical"),
         warning_count=sum(1 for finding in findings if str(finding.get("severity", "")).lower() == "warning"),
         parent_run_id=parent_run_id,
@@ -78,6 +83,15 @@ def build_record(run_id: str) -> ExperimentRecord:
 
 def _read_review_report(run_id: str) -> dict[str, Any] | None:
     path = run_reader.run_dir_for(run_id) / "review_report.json"
+    if not path.exists():
+        return None
+    import json
+
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_critic_report(run_id: str) -> dict[str, Any] | None:
+    path = run_reader.run_dir_for(run_id) / "critic_report.json"
     if not path.exists():
         return None
     import json
