@@ -9,6 +9,7 @@ import yaml
 from quantbench.data.providers.ccxt_perpetual import fetch_top_symbols_by_volume
 from quantbench.data.providers.ccxt_perpetual import name as ccxt_provider_name
 from quantbench.data.providers.sp500_constituents import WIKIPEDIA_SP500_URL, fetch_current_constituents
+from quantbench.data.providers.sp500_history import build_point_in_time_sp500
 
 
 SURVIVORSHIP_BIAS_NOTE = (
@@ -36,6 +37,13 @@ CRYPTO_UNIVERSE_NOTE = (
 )
 
 
+PIT_SP500_NOTE = (
+    "This universe uses point-in-time S&P 500 membership intervals over the requested "
+    "backtest window, so the universe definition itself is not survivorship-biased. "
+    "Data coverage for removed or delisted members is still audited separately."
+)
+
+
 @dataclass(frozen=True)
 class UniverseDefinition:
     name: str
@@ -46,6 +54,8 @@ class UniverseDefinition:
     source: str
     sample_limit: int | None = None
     asset_class: str = "equity"
+    membership_intervals: dict[str, list[list[str]]] | None = None
+    covers_delisted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -56,10 +66,36 @@ class UniverseDefinition:
 
 
 def build_sp500_universe(
-    as_of_date: str, point_in_time: bool = False, limit: int | None = None
+    as_of_date: str,
+    point_in_time: bool = False,
+    limit: int | None = None,
+    start: str | None = None,
+    end: str | None = None,
 ) -> UniverseDefinition:
     if point_in_time:
-        raise NotImplementedError("Point-in-time S&P 500 membership is not implemented in Phase 1 v1")
+        if not start or not end:
+            raise ValueError("point-in-time S&P 500 universe requires start and end")
+        symbols, intervals = build_point_in_time_sp500(start, end)
+        normalized_intervals = _serializable_intervals(intervals)
+        note = PIT_SP500_NOTE
+        if limit is not None:
+            if limit < 1:
+                raise ValueError("limit must be at least 1")
+            symbols = symbols[:limit]
+            normalized_intervals = {symbol: normalized_intervals[symbol] for symbol in symbols}
+            note = f"{PIT_SP500_NOTE} {LIMITED_SAMPLE_NOTE_TEMPLATE.format(limit=limit)}"
+        return UniverseDefinition(
+            name="sp500",
+            as_of_date=as_of_date,
+            symbols=symbols,
+            point_in_time=True,
+            survivorship_bias_note=note,
+            source=WIKIPEDIA_SP500_URL,
+            sample_limit=limit,
+            asset_class="equity",
+            membership_intervals=normalized_intervals,
+            covers_delisted=False,
+        )
 
     constituents = fetch_current_constituents()
     symbols = sorted(constituents["Symbol"].dropna().astype(str).unique().tolist())
@@ -105,11 +141,22 @@ def build_crypto_perpetual_universe(as_of_date: str, limit: int = 30) -> Univers
 
 
 def build_universe(
-    name: str, as_of_date: str, point_in_time: bool = False, limit: int | None = None
+    name: str,
+    as_of_date: str,
+    point_in_time: bool = False,
+    limit: int | None = None,
+    start: str | None = None,
+    end: str | None = None,
 ) -> UniverseDefinition:
     normalized = name.lower().replace("-", "").replace("_", "")
     if normalized in {"sp500", "s&p500", "sandp500"}:
-        return build_sp500_universe(as_of_date=as_of_date, point_in_time=point_in_time, limit=limit)
+        return build_sp500_universe(
+            as_of_date=as_of_date,
+            point_in_time=point_in_time,
+            limit=limit,
+            start=start,
+            end=end,
+        )
     top_n_match = re.fullmatch(r"top(\d+)usdtperpetual", normalized)
     if normalized in {"topusdtperpetual", "cryptoperpetual", "usdtperpetual"} or top_n_match:
         if point_in_time:
@@ -117,3 +164,12 @@ def build_universe(
         parsed_limit = int(top_n_match.group(1)) if top_n_match else 30
         return build_crypto_perpetual_universe(as_of_date=as_of_date, limit=limit or parsed_limit)
     raise ValueError(f"Unsupported universe: {name}")
+
+
+def _serializable_intervals(
+    intervals: dict[str, list[tuple[str, str]]] | dict[str, list[list[str]]],
+) -> dict[str, list[list[str]]]:
+    return {
+        str(symbol): [[str(start), str(end)] for start, end in spans]
+        for symbol, spans in intervals.items()
+    }

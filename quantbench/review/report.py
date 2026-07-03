@@ -29,6 +29,8 @@ BETA_ABS_WARNING = 0.7
 MIN_OOS_OBSERVATIONS = 30
 MIN_BETA_OBSERVATIONS = 30
 MIN_WALK_FORWARD_WINDOWS = 3
+UNIVERSE_COVERAGE_MISSING_WARNING = 0.10
+UNIVERSE_COVERAGE_MISSING_CRITICAL = 0.40
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,8 @@ def run_review(
     n_trials: int = 1,
     trial_sharpes: list[float] | None = None,
     pbo_result: PBOResult | None = None,
+    universe_coverage: dict[str, Any] | None = None,
+    funding_cost_sensitivity: dict[str, Any] | None = None,
 ) -> ReviewReport:
     findings: list[ReviewFinding] = []
     findings.extend(_safe("lookahead", lambda: _lookahead_findings(code)))
@@ -119,6 +123,10 @@ def run_review(
     findings.extend(_safe("beta_exposure", lambda: [_beta_finding(returns, benchmark_returns, benchmark_symbol)]))
     if factor_panel is not None and n_groups is not None:
         findings.extend(_safe("symbol_concentration", lambda: [_symbol_finding(factor_panel, n_groups)]))
+    if universe_coverage is not None:
+        findings.append(_universe_coverage_finding(universe_coverage))
+    if funding_cost_sensitivity is not None:
+        findings.append(_funding_cost_finding(funding_cost_sensitivity))
     verdict, reason = determine_verdict(findings)
     return ReviewReport(findings=findings, verdict=verdict, verdict_reason=reason)
 
@@ -153,6 +161,97 @@ def _lookahead_findings(code: str) -> list[ReviewFinding]:
             )
         )
     return findings
+
+
+def _universe_coverage_finding(coverage: dict[str, Any]) -> ReviewFinding:
+    if not coverage.get("point_in_time"):
+        return ReviewFinding(
+            "universe_coverage",
+            "pass",
+            "Universe coverage audit is not required for a non-point-in-time universe.",
+            coverage,
+        )
+
+    expected = int(coverage.get("expected_member_bars") or 0)
+    observed = int(coverage.get("observed_member_bars") or 0)
+    missing = int(coverage.get("missing_member_bars") or max(expected - observed, 0))
+    missing_rate = float(coverage.get("missing_rate") or (missing / expected if expected else 0.0))
+    missing_symbols = list(coverage.get("symbols_missing_entirely") or [])
+    covers_delisted = bool(coverage.get("covers_delisted"))
+
+    if expected <= 0:
+        return ReviewFinding(
+            "universe_coverage",
+            "info",
+            "Point-in-time universe coverage could not be evaluated because no expected member bars were counted.",
+            coverage,
+        )
+
+    # A point-in-time universe that is missing most of its member data is barely
+    # better than the survivorship-biased snapshot it replaces - reject it rather
+    # than presenting it as merely "promising".
+    if missing_rate > UNIVERSE_COVERAGE_MISSING_CRITICAL:
+        return ReviewFinding(
+            "universe_coverage",
+            "critical",
+            (
+                "Point-in-time universe is missing the majority of member data; the sample is not "
+                f"representative of the true historical universe ({observed}/{expected} member bars observed, "
+                f"{missing_rate:.1%} missing, {len(missing_symbols)} symbols missing entirely)."
+            ),
+            coverage,
+        )
+
+    data_gap = missing_rate > UNIVERSE_COVERAGE_MISSING_WARNING or bool(missing_symbols)
+    if not covers_delisted and not data_gap:
+        # Coverage is otherwise fine; the only reason for the warning is that no
+        # delisted-data source is configured. Make clear this cap is expected and
+        # by design, not a signal that the factor is weak, so users don't read a
+        # permanently-PROMISING point-in-time run as a factor-quality problem.
+        return ReviewFinding(
+            "universe_coverage",
+            "warning",
+            (
+                "Point-in-time run is capped at PROMISING by design: no delisted-data source is configured "
+                "(covers_delisted=false), so a small residual survivorship bias from unlisted members cannot be "
+                f"ruled out. Data coverage is otherwise good ({observed}/{expected} member bars observed). This "
+                "cap is expected, not a factor-quality problem, and lifts once a delisted-data source is added."
+            ),
+            coverage,
+        )
+
+    if (not covers_delisted) or data_gap:
+        return ReviewFinding(
+            "universe_coverage",
+            "warning",
+            (
+                "Point-in-time universe has incomplete member data coverage; residual survivorship bias may remain "
+                f"({observed}/{expected} member bars observed, {missing_rate:.1%} missing, "
+                f"{len(missing_symbols)} symbols missing entirely)."
+            ),
+            coverage,
+        )
+
+    return ReviewFinding(
+        "universe_coverage",
+        "pass",
+        f"Point-in-time universe member coverage is acceptable ({observed}/{expected} member bars observed).",
+        coverage,
+    )
+
+
+def _funding_cost_finding(detail: dict[str, Any]) -> ReviewFinding:
+    before = detail.get("sharpe_before_funding")
+    after = detail.get("sharpe_after_funding")
+    if before is None or after is None:
+        return ReviewFinding("funding_cost_sensitivity", "info", "Funding cost sensitivity could not be evaluated.", detail)
+    decay = float(before) - float(after)
+    severity = "warning" if decay > 0.5 else "pass"
+    message = (
+        f"Funding-adjusted Sharpe changed from {float(before):.3f} to {float(after):.3f} "
+        f"(decay {decay:.3f})."
+    )
+    return ReviewFinding("funding_cost_sensitivity", severity, message, detail)
 
 
 def _oos_finding(result: OOSResult) -> ReviewFinding:

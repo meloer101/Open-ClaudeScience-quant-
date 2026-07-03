@@ -5,7 +5,9 @@ import json
 import click
 
 from quantbench.agent.coordinator import Coordinator
+from quantbench.api import run_reader
 from quantbench.config import FACTORS_DIR as DEFAULT_FACTORS_DIR
+from quantbench.data.cache import file_sha256
 from quantbench.config import SKILL_DOCS_DIR as DEFAULT_SKILL_DOCS_DIR
 from quantbench.factors.entry import RejectedFactorError, build_entry_from_run
 from quantbench.factors.parametrize import parse_param_overrides
@@ -30,6 +32,9 @@ def main(args: tuple[str, ...]) -> None:
         return
     if args[0] == "compare":
         _compare(args[1:])
+        return
+    if args[0] == "rerun":
+        _rerun(args[1:])
         return
     if args[0] == "portfolio":
         _portfolio(args[1:])
@@ -76,6 +81,43 @@ def _compare(args: tuple[str, ...]) -> None:
         click.echo(json.dumps(table, ensure_ascii=False, indent=2))
         return
     _echo_compare_table(table)
+
+
+def _rerun(args: tuple[str, ...]) -> None:
+    if not args:
+        raise click.UsageError("rerun requires run_id")
+    run_id = args[0]
+    manifest = run_reader.read_manifest(run_id)
+    if manifest is None:
+        raise click.ClickException(f"run not found: {run_id}")
+    slices = manifest.get("data_slices") or []
+    if not slices:
+        raise click.ClickException(f"run {run_id} has no data_slices; cannot verify reproducible rerun data")
+    drifted = []
+    missing = []
+    for item in slices:
+        path = item.get("path")
+        expected = item.get("content_hash")
+        if not path or not expected:
+            drifted.append(f"{item.get('symbol', 'unknown')}: missing path/hash metadata")
+            continue
+        from pathlib import Path
+
+        file_path = Path(path)
+        if not file_path.exists():
+            missing.append(str(file_path))
+            continue
+        actual = file_sha256(file_path)
+        if actual != expected:
+            drifted.append(f"{item.get('symbol', file_path.name)}: expected {expected}, got {actual}")
+    if missing or drifted:
+        details = []
+        if missing:
+            details.append("missing slices: " + ", ".join(missing[:5]))
+        if drifted:
+            details.append("drifted slices: " + "; ".join(drifted[:5]))
+        raise click.ClickException("Data drift detected; result is not directly comparable. " + " | ".join(details))
+    click.echo(f"Data slices verified for {run_id}; cached inputs match manifest hashes.")
 
 
 _PORTFOLIO_VALUE_OPTIONS = ("--method", "--cost-bps", "--split", "--max-weight")

@@ -78,6 +78,7 @@ class Run:
         critic: dict[str, Any] | None = None,
         parent_run_id: str | None = None,
         injected_skills: list[str] | None = None,
+        data_slices: list[dict[str, Any]] | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -93,6 +94,7 @@ class Run:
             "parent_run_id": parent_run_id,
             "injected_skills": injected_skills or [],
             "data_hash": data_hash,
+            "data_slices": data_slices or [],
             "code_hash": code_hash,
             "warnings": warnings or [],
             "conversation_log": conversation_log,

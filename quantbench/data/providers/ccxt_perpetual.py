@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from quantbench.data.providers.base import ProviderResult
+from quantbench.data.providers.base import Adjustment, ProviderResult
 
 
 # Which ccxt exchange serves crypto perpetual swap data. Binance's site/API is
@@ -51,7 +51,40 @@ def _resolve_swap_symbol(exchange, symbol: str) -> str:
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> ProviderResult:
-    return ProviderResult(df=download_ohlcv(symbol, timeframe, start, end), source=f"{name}_swap")
+    return ProviderResult(
+        df=download_ohlcv(symbol, timeframe, start, end),
+        source=f"{name}_swap",
+        adjustment=Adjustment(method="raw", dividend_reinvested=False),
+    )
+
+
+def fetch_funding_rate(symbol: str, start: str, end: str) -> ProviderResult:
+    exchange = _build_exchange()
+    resolved_symbol = _resolve_swap_symbol(exchange, symbol)
+    since = exchange.parse8601(f"{start}T00:00:00Z")
+    end_ts = pd.Timestamp(end, tz="UTC")
+    rows = exchange.fetch_funding_rate_history(resolved_symbol, since=since, limit=1000)
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return ProviderResult(
+            df=pd.DataFrame(columns=["timestamp", "funding_rate"]),
+            source=f"{name}_funding",
+            adjustment=Adjustment(method="raw", dividend_reinvested=False),
+        )
+    rate_col = "fundingRate" if "fundingRate" in frame.columns else "funding_rate"
+    out = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(frame["timestamp"], unit="ms", utc=True),
+            "funding_rate": pd.to_numeric(frame[rate_col], errors="coerce"),
+        }
+    )
+    out = out.dropna(subset=["timestamp", "funding_rate"])
+    out = out[out["timestamp"] < end_ts].sort_values("timestamp").reset_index(drop=True)
+    return ProviderResult(
+        df=out,
+        source=f"{name}_funding",
+        adjustment=Adjustment(method="raw", dividend_reinvested=False),
+    )
 
 
 def fetch_top_symbols_by_volume(quote: str = "USDT", limit: int = 30) -> list[dict]:

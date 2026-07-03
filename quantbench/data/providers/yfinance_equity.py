@@ -1,6 +1,6 @@
 import pandas as pd
 
-from quantbench.data.providers.base import ProviderResult
+from quantbench.data.providers.base import Adjustment, ProviderResult
 
 
 name = "yfinance_equity"
@@ -19,7 +19,11 @@ _INTERVALS = {
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> ProviderResult:
-    return ProviderResult(df=download_ohlcv(symbol, timeframe, start, end), source="yfinance")
+    return ProviderResult(
+        df=download_ohlcv(symbol, timeframe, start, end),
+        source="yfinance",
+        adjustment=Adjustment(method="raw", dividend_reinvested=False),
+    )
 
 
 def download_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> pd.DataFrame:

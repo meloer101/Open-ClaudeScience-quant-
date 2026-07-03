@@ -5,6 +5,7 @@ import pandas as pd
 
 from quantbench.data.cache import (
     cache_path_for,
+    file_sha256,
     normalize_ohlcv,
     read_cache_meta,
     read_parquet_quiet,
@@ -24,7 +25,18 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> tuple[Path
     if cache_path.exists():
         df = read_parquet_quiet(cache_path)
         cached_meta = read_cache_meta(cache_path)
-        meta = {"cache_hit": True, "path": str(cache_path), "rows": len(df), "provider": provider.name, **cached_meta}
+        meta = {
+            "cache_hit": True,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "start": start,
+            "end": end,
+            "path": str(cache_path),
+            "content_hash": file_sha256(cache_path),
+            "rows": len(df),
+            "provider": provider.name,
+            **cached_meta,
+        }
         return cache_path, normalize_ohlcv(df), meta
 
     try:
@@ -32,23 +44,34 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> tuple[Path
             result = provider.fetch_ohlcv(symbol, timeframe, start, end)
         df = result.df
         source = result.source
+        adjustment = result.adjustment.to_dict() if result.adjustment else None
         fallback_error = None
     except Exception as exc:
         df = _synthetic_ohlcv(start, end, timeframe)
         source = SYNTHETIC_FALLBACK_SOURCE
+        adjustment = {"method": "synthetic", "dividend_reinvested": False}
         fallback_error = f"{type(exc).__name__}: {exc}"
 
     df = normalize_ohlcv(df)
     write_parquet_quiet(df, cache_path)
     meta = {
         "cache_hit": False,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "start": start,
+        "end": end,
         "path": str(cache_path),
+        "content_hash": file_sha256(cache_path),
         "rows": len(df),
         "provider": provider.name,
         "source": source,
+        "adjustment": adjustment,
         "fallback_reason": fallback_error,
     }
-    write_cache_meta(cache_path, {"provider": provider.name, "source": source, "fallback_reason": fallback_error})
+    write_cache_meta(
+        cache_path,
+        {"provider": provider.name, "source": source, "adjustment": adjustment, "fallback_reason": fallback_error},
+    )
     return cache_path, df, meta
 
 

@@ -37,14 +37,14 @@
 ### 1.1 Point-in-time universe（优先级：🔴 最高）
 
 **现状**：
-- S&P 500 用当前成分股快照（`sp500_constituents.py`），显式标注 survivorship bias。
+- S&P 500 支持当前成分股快照（显式标注 survivorship bias）和基于 Wikipedia 变更表重建的 point-in-time membership intervals。
 - Crypto 用**当前** 24h 成交量 Top-N USDT 永续合约，显式标注非 point-in-time。
 
 **缺什么**：
-- [ ] S&P 500 历史成分股变更表（Wikipedia 有完整的加入/剔除历史，可解析；或购买正式数据）。给定任意 as_of_date，返回当时的真实成分。
+- [x] S&P 500 历史成分股变更表（Wikipedia 有完整的加入/剔除历史，可解析；或购买正式数据）。给定任意 as_of_date，返回当时的真实成分。
 - [ ] Crypto 历史成交量快照重建：按历史某日的 24h/30d 成交量排名构建当时的 Top-N，而不是用今天的排名回填历史。
-- [ ] `UniverseDefinition.point_in_time = True` 路径的真正实现（当前 `universe.py` 中 `point_in_time=True` 分支是拒绝/未实现的）。
-- [ ] 回测引擎支持**时变 universe**：成分股在回测期内进出，因子截面只在当日成分内计算。这对 `cross_sectional_backtest.py` 是一个结构性改动（当前假设 panel 内 symbol 集合固定）。
+- [x] `UniverseDefinition.point_in_time = True` 路径的真正实现（当前 `universe.py` 中 `point_in_time=True` 分支是拒绝/未实现的）。
+- [x] 回测引擎支持**时变 universe**：成分股在回测期内进出，因子截面只在当日成分内计算。这对 `cross_sectional_backtest.py` 是一个结构性改动（当前假设 panel 内 symbol 集合固定）。
 
 **验收标准**：同一个 20 日动量因子，在 point-in-time S&P 500 和当前快照 S&P 500 上分别回测，系统能并排展示两者差异，research note 明确说明使用了哪种 universe。
 
@@ -55,36 +55,36 @@
 **缺什么**：
 - [ ] Crypto：评估退市永续合约历史数据来源（交易所归档 / Tardis / 自建快照积累）。最低成本方案：从现在开始每日快照当前 universe 与行情，随时间自然积累无偏差数据。
 - [ ] Equity：评估含退市股票的数据源（见 1.3）。
-- [ ] 在 universe 元数据中记录"本 universe 覆盖退市标的：是/否"，Reviewer 对"否"的截面 run 输出结构性警告并影响 verdict 上限（例如封顶 PROMISING，不给 STRONG）。
+- [x] 在 universe 元数据中记录"本 universe 覆盖退市标的：是/否"，Reviewer 对"否"的 PIT 截面 run 输出结构性警告并影响 verdict 上限（例如封顶 PROMISING，不给 STRONG）。
 
 ### 1.3 数据源健壮性与正式数据源抽象位（优先级：🟡 中高）
 
-**现状**：美股唯一来源是 yfinance——免费、非官方、随时会挂、复权口径不透明且历史数据会被追溯修改。
+**现状**：美股默认来源仍是 yfinance；`ProviderResult` 已记录 adjustment/fallback metadata，并已留出 Polygon schema 映射 stub，但真实付费源尚未启用。
 
 **缺什么**：
-- [ ] Provider 抽象已存在（`providers/base.py`），但需要为至少一个**可付费正式数据源**留好实现位（Polygon / Tiingo / Databento / Tardis 等），并明确各字段的 schema 映射。
-- [ ] 复权方式显式记录：前复权 / 后复权 / 分红是否再投，写入 dataset 元数据和 research note。当前 `adjusted: bool` 一个布尔值不足以描述。
-- [ ] 数据源降级策略：主源失败时的行为（报错终止 vs 降级并警告），不允许静默切换。
+- [x] Provider 抽象已存在（`providers/base.py`），但需要为至少一个**可付费正式数据源**留好实现位（Polygon / Tiingo / Databento / Tardis 等），并明确各字段的 schema 映射。
+- [x] 复权方式显式记录：前复权 / 后复权 / 分红是否再投，写入 dataset 元数据和 research note。当前 `adjusted: bool` 一个布尔值不足以描述。
+- [x] 数据源降级策略：主源失败时的行为（报错终止 vs 降级并警告），不允许静默切换。
 
 ### 1.4 数据版本锁定的完整闭环（优先级：🟡 中高）
 
-**现状**：VISION 4.1 承诺"每次 run 记录数据快照 hash"，warehouse/cache 存在，但 manifest 中数据 hash → 可复现重跑的闭环没有完整落地。yfinance 的复权数据会被追溯修改，意味着**同一个 run 半年后重跑结果不同，"可复现"承诺已经破了**。
+**现状**：manifest 已记录 run 级 `data_hash` 和分片级 `data_slices`；`quantbench rerun <run_id>` 已能校验缓存分片 hash 并在漂移时硬失败。完整自动重放 run 配置并 bit-level 重算指标仍未完成。
 
 **缺什么**：
-- [ ] 每次 run 在 manifest 中记录所用每个数据分片的内容 hash + 行数 + 时间范围。
-- [ ] `quantbench rerun <run_id>` 命令：优先使用缓存中 hash 匹配的数据分片重跑；若缓存已失效且重新拉取的数据 hash 不匹配，显式报告"数据已漂移，结果不可直接对比"。
+- [x] 每次 run 在 manifest 中记录所用每个数据分片的内容 hash + 行数 + 时间范围。
+- [x] `quantbench rerun <run_id>` 命令：优先使用缓存中 hash 匹配的数据分片；若缓存已失效或数据 hash 不匹配，显式报告"数据已漂移，结果不可直接对比"。
 - [ ] 数据分片的保留策略（跑过 run 的数据分片不被缓存淘汰，或淘汰前归档）。
 
 ### 1.5 Funding rate 与持有成本建模（优先级：🔴 高，crypto 结论可信的前提）
 
-**现状**：crypto 永续 run 只在 coordinator 写入一条 "funding rate carry cost 未建模" 的警告。VISION 技能清单里有 `fetch_funding_rate`，未实现，roadmap 无排期。
+**现状**：CCXT funding rate 拉取、DuckDB funding cache、截面引擎 funding 扣减和 Reviewer `funding_cost_sensitivity` 已接入；open interest 仍未落地。
 
 **为什么致命**：永续多空组合里 funding 是一等成本项。做多高动量币种往往意味着持续支付正 funding，年化可以吃掉几十个百分点，足以把 Sharpe 1.5 的策略变成亏损。
 
 **缺什么**：
-- [ ] `fetch_funding_rate` skill（CCXT 支持拉取历史 funding rate）。
-- [ ] 回测引擎在 crypto 永续场景下将 funding 计入持仓成本（按持仓方向逐期扣减）。
-- [ ] Reviewer 新增检查项：funding 计入前后的 Sharpe 对比（类似现有 cost_sensitivity 的结构）。
+- [x] `fetch_funding_rate` skill（CCXT 支持拉取历史 funding rate）。
+- [x] 回测引擎在 crypto 永续场景下将 funding 计入持仓成本（按持仓方向逐期扣减）。
+- [x] Reviewer 新增检查项：funding 计入前后的 Sharpe 对比（类似现有 cost_sensitivity 的结构）。
 - [ ] 数据 schema 落地 VISION 中已定义的 `PerpetualData`（funding_rate / open_interest 字段）。
 
 ---

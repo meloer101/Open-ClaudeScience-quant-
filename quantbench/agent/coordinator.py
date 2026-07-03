@@ -29,7 +29,7 @@ from quantbench.config import SKILL_DOCS_DIR as DEFAULT_SKILL_DOCS_DIR
 from quantbench.data.cache import file_sha256
 from quantbench.data.exchange import SYNTHETIC_FALLBACK_SOURCE, fetch_ohlcv
 from quantbench.data.universe import UniverseDefinition, build_universe
-from quantbench.data.warehouse import fetch_universe_ohlcv
+from quantbench.data.warehouse import fetch_universe_funding_rates, fetch_universe_ohlcv
 from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backtest
 from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
@@ -178,8 +178,10 @@ BUILD_UNIVERSE_PARAMS = {
         "as_of_date": {"type": "string", "description": "YYYY-MM-DD date for the universe definition."},
         "point_in_time": {
             "type": "boolean",
-            "description": "Phase 1 v1 only supports false. True raises an explicit not-implemented error.",
+            "description": "Use point-in-time membership when supported. For sp500, also pass start and end.",
         },
+        "start": {"type": "string", "description": "YYYY-MM-DD backtest start, required when point_in_time is true."},
+        "end": {"type": "string", "description": "YYYY-MM-DD backtest end, required when point_in_time is true."},
         "limit": {
             "type": "integer",
             "description": (
@@ -304,6 +306,8 @@ class _RunContext:
         self.signal_code: str | None = None
         self.universe: UniverseDefinition | None = None
         self.panel_df = None
+        self.funding_df = None
+        self.funding_meta: dict[str, Any] | None = None
         self.data_quality: DataQualityReport | None = None
         self.cross_sectional = False
         self.warnings: list[str] = []
@@ -388,9 +392,22 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
         return {**backtest.metrics, "warnings": new_warnings, "review": review_report.to_dict()}
 
     def _build_universe(
-        universe_name: str, as_of_date: str, point_in_time: bool = False, limit: int | None = None
+        universe_name: str,
+        as_of_date: str,
+        point_in_time: bool = False,
+        limit: int | None = None,
+        start: str | None = None,
+        end: str | None = None,
     ) -> dict:
-        universe = build_universe(universe_name, as_of_date, point_in_time=point_in_time, limit=limit)
+        try:
+            kwargs: dict[str, Any] = {"point_in_time": point_in_time, "limit": limit}
+            if start is not None:
+                kwargs["start"] = start
+            if end is not None:
+                kwargs["end"] = end
+            universe = build_universe(universe_name, as_of_date, **kwargs)
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
         ctx.universe = universe
         run.save_text("universe.yaml", __import__("yaml").safe_dump(universe.to_dict(), sort_keys=False, allow_unicode=True))
         ctx.warnings.append(universe.survivorship_bias_note)
@@ -401,6 +418,8 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             "point_in_time": universe.point_in_time,
             "sample_limit": universe.sample_limit,
             "asset_class": universe.asset_class,
+            "membership_intervals": universe.membership_intervals,
+            "covers_delisted": universe.covers_delisted,
             "survivorship_bias_note": universe.survivorship_bias_note,
             "source": universe.source,
         }
@@ -423,6 +442,12 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             return {"error": "no universe loaded yet - call build_universe first"}
 
         panel, cache_meta = fetch_universe_ohlcv(ctx.universe, timeframe, start, end)
+        funding_rates = None
+        funding_meta = None
+        if _is_crypto_universe(ctx.universe):
+            funding_rates, funding_meta = fetch_universe_funding_rates(ctx.universe, start, end)
+            ctx.funding_df = funding_rates
+            ctx.funding_meta = funding_meta
         ctx.panel_df = panel
         ctx.cache_meta = cache_meta
         ctx.data_quality = validate_universe_data(panel, ctx.universe, end=end)
@@ -445,7 +470,24 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             compute,
             n_groups=n_groups,
             cost_bps=cost_bps,
+            membership_intervals=ctx.universe.membership_intervals,
+            funding_rates=funding_rates,
         )
+        funding_sensitivity = None
+        if funding_rates is not None and not funding_rates.empty:
+            no_funding_metrics = run_cross_sectional_backtest(
+                panel,
+                compute,
+                n_groups=n_groups,
+                cost_bps=cost_bps,
+                membership_intervals=ctx.universe.membership_intervals,
+            ).metrics
+            funding_sensitivity = {
+                "sharpe_before_funding": no_funding_metrics.get("sharpe"),
+                "sharpe_after_funding": backtest.metrics.get("sharpe"),
+                "funding_rows": len(funding_rates),
+                "funding_sources": (funding_meta or {}).get("sources", {}),
+            }
 
         ctx.signal_code = code
         ctx.last_metrics = backtest.metrics
@@ -471,10 +513,21 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             code=code,
             returns=backtest.returns,
             cost_bps=cost_bps,
-            rerun_at_cost=lambda bps: run_cross_sectional_backtest(panel, compute, n_groups=n_groups, cost_bps=bps).metrics,
-            rerun_with_code=lambda candidate: _rerun_cross_with_code(candidate, panel, n_groups, cost_bps),
+            rerun_at_cost=lambda bps: run_cross_sectional_backtest(
+                panel,
+                compute,
+                n_groups=n_groups,
+                cost_bps=bps,
+                membership_intervals=ctx.universe.membership_intervals,
+                funding_rates=funding_rates,
+            ).metrics,
+            rerun_with_code=lambda candidate: _rerun_cross_with_code(
+                candidate, panel, n_groups, cost_bps, ctx.universe.membership_intervals
+            ),
             out_of_sample_data=panel,
-            run_on_data=lambda data: _rerun_cross_with_code(code, data, n_groups, cost_bps) or {},
+            run_on_data=lambda data: _rerun_cross_with_code(
+                code, data, n_groups, cost_bps, ctx.universe.membership_intervals
+            ) or {},
             benchmark_returns=_fetch_benchmark_returns(
                 {"symbol": benchmark_symbol, "timeframe": timeframe, "start": start, "end": end}, None
             ),
@@ -482,6 +535,8 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             factor_panel=backtest.factor_panel,
             n_groups=n_groups,
             turnover_annual=backtest.metrics.get("turnover_annual"),
+            universe_coverage=(cache_meta.get("coverage_report") if isinstance(cache_meta, dict) else None),
+            funding_cost_sensitivity=funding_sensitivity,
         )
         ctx.review_report = review_report
         run.save_json("review_report.json", review_report.to_dict())
@@ -493,6 +548,7 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             **backtest.metrics,
             "data_quality": ctx.data_quality.to_dict(),
             "cache": cache_meta,
+            "funding": funding_meta,
             "warnings": new_warnings,
             "review": review_report.to_dict(),
         }
@@ -519,6 +575,10 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             normalized.append({"name": name, "code": code})
 
         panel, cache_meta = fetch_universe_ohlcv(ctx.universe, timeframe, start, end)
+        funding_rates = None
+        funding_meta = None
+        if _is_crypto_universe(ctx.universe):
+            funding_rates, funding_meta = fetch_universe_funding_rates(ctx.universe, start, end)
         # Fetched once up front rather than per-candidate: all candidates share the same
         # universe/date range/timeframe, so the benchmark series is identical for every
         # one of them. Fetching it once also avoids N threads racing an identical
@@ -544,6 +604,8 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
                     ctx.universe,
                     panel,
                     cache_meta,
+                    funding_rates,
+                    funding_meta,
                     candidate,
                     start,
                     end,
@@ -762,6 +824,8 @@ def _run_screen_candidate(
     universe: UniverseDefinition,
     panel: pd.DataFrame,
     cache_meta: dict[str, Any],
+    funding_rates: pd.DataFrame | None,
+    funding_meta: dict[str, Any] | None,
     candidate: dict[str, str],
     start: str,
     end: str,
@@ -801,7 +865,29 @@ def _run_screen_candidate(
     try:
         ctx.data_quality = validate_universe_data(panel, universe, end=end)
         compute = load_signal_function(candidate["code"])
-        backtest = run_cross_sectional_backtest(panel, compute, n_groups=n_groups, cost_bps=cost_bps)
+        backtest = run_cross_sectional_backtest(
+            panel,
+            compute,
+            n_groups=n_groups,
+            cost_bps=cost_bps,
+            membership_intervals=universe.membership_intervals,
+            funding_rates=funding_rates,
+        )
+        funding_sensitivity = None
+        if funding_rates is not None and not funding_rates.empty:
+            no_funding_metrics = run_cross_sectional_backtest(
+                panel,
+                compute,
+                n_groups=n_groups,
+                cost_bps=cost_bps,
+                membership_intervals=universe.membership_intervals,
+            ).metrics
+            funding_sensitivity = {
+                "sharpe_before_funding": no_funding_metrics.get("sharpe"),
+                "sharpe_after_funding": backtest.metrics.get("sharpe"),
+                "funding_rows": len(funding_rates),
+                "funding_sources": (funding_meta or {}).get("sources", {}),
+            }
         ctx.last_metrics = backtest.metrics
 
         panel_path = child.run_dir / "panel.parquet"
@@ -818,16 +904,29 @@ def _run_screen_candidate(
             code=candidate["code"],
             returns=backtest.returns,
             cost_bps=cost_bps,
-            rerun_at_cost=lambda bps: run_cross_sectional_backtest(panel, compute, n_groups=n_groups, cost_bps=bps).metrics,
-            rerun_with_code=lambda code: _rerun_cross_with_code(code, panel, n_groups, cost_bps),
+            rerun_at_cost=lambda bps: run_cross_sectional_backtest(
+                panel,
+                compute,
+                n_groups=n_groups,
+                cost_bps=bps,
+                membership_intervals=universe.membership_intervals,
+                funding_rates=funding_rates,
+            ).metrics,
+            rerun_with_code=lambda code: _rerun_cross_with_code(
+                code, panel, n_groups, cost_bps, universe.membership_intervals
+            ),
             out_of_sample_data=panel,
-            run_on_data=lambda data: _rerun_cross_with_code(candidate["code"], data, n_groups, cost_bps) or {},
+            run_on_data=lambda data: _rerun_cross_with_code(
+                candidate["code"], data, n_groups, cost_bps, universe.membership_intervals
+            ) or {},
             benchmark_returns=benchmark_returns,
             benchmark_symbol=benchmark_symbol,
             factor_panel=backtest.factor_panel,
             n_groups=n_groups,
             turnover_annual=backtest.metrics.get("turnover_annual"),
             n_trials=effective_trials,
+            universe_coverage=(cache_meta.get("coverage_report") if isinstance(cache_meta, dict) else None),
+            funding_cost_sensitivity=funding_sensitivity,
         )
         ctx.review_report = review_report
         child.save_json("review_report.json", review_report.to_dict())
@@ -861,6 +960,8 @@ def _run_screen_candidate(
             "critic_model": critic_model,
             "data_path": str(panel_path),
             "cache": cache_meta,
+            "data_slices": _data_slices_from_cache(cache_meta),
+            "funding": funding_meta,
             "universe": universe.to_dict(),
             "start": start,
             "end": end,
@@ -895,6 +996,7 @@ def _run_screen_candidate(
             review=review_report.to_dict(),
             critic=ctx.critic_report.to_dict() if ctx.critic_report else None,
             parent_run_id=parent_run_id,
+            data_slices=_data_slices_from_cache(cache_meta),
         )
         item = _screen_item(candidate["name"], child.run_id, "completed", backtest.metrics, review_report, ctx.critic_report)
         item["_returns"] = backtest.returns
@@ -1433,6 +1535,8 @@ class Coordinator:
             "critic_model": self.critic_model,
             "data_path": reproduce_data_path,
             "cache": ctx.cache_meta,
+            "data_slices": _data_slices_from_cache(ctx.cache_meta),
+            "funding": ctx.funding_meta,
             "universe": ctx.universe.to_dict() if ctx.universe else None,
             # Only set for single-symbol runs (ctx.fetch_params is populated by
             # _fetch_ohlcv). Nothing else in config.yaml/backtest_result.json
@@ -1498,6 +1602,7 @@ class Coordinator:
             critic=ctx.critic_report.to_dict() if ctx.critic_report else None,
             parent_run_id=parent_run_id,
             injected_skills=ctx.injected_skills,
+            data_slices=_data_slices_from_cache(ctx.cache_meta),
         )
 
         return RunResult(
@@ -1738,10 +1843,22 @@ def _rerun_single_with_code(code: str, data_df, cost_bps: float) -> dict[str, fl
         return None
 
 
-def _rerun_cross_with_code(code: str, panel, n_groups: int, cost_bps: float) -> dict[str, float] | None:
+def _rerun_cross_with_code(
+    code: str,
+    panel,
+    n_groups: int,
+    cost_bps: float,
+    membership_intervals: dict[str, list[list[str]]] | None = None,
+) -> dict[str, float] | None:
     try:
         compute = load_signal_function(code)
-        return run_cross_sectional_backtest(panel, compute, n_groups=n_groups, cost_bps=cost_bps).metrics
+        return run_cross_sectional_backtest(
+            panel,
+            compute,
+            n_groups=n_groups,
+            cost_bps=cost_bps,
+            membership_intervals=membership_intervals,
+        ).metrics
     except Exception:
         return None
 
@@ -1784,6 +1901,33 @@ def _is_crypto_symbol(fetch_params: dict[str, str] | None) -> bool:
 
 def _is_crypto_universe(universe: UniverseDefinition | None) -> bool:
     return bool(universe and universe.asset_class == "crypto")
+
+
+def _data_slices_from_cache(cache_meta: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not cache_meta:
+        return []
+    slices = cache_meta.get("data_slices")
+    if isinstance(slices, list):
+        return slices
+    path = cache_meta.get("path")
+    content_hash = cache_meta.get("content_hash")
+    if not path or not content_hash:
+        return []
+    return [
+        {
+            "symbol": cache_meta.get("symbol"),
+            "timeframe": cache_meta.get("timeframe"),
+            "start": cache_meta.get("start"),
+            "end": cache_meta.get("end"),
+            "path": path,
+            "content_hash": content_hash,
+            "rows": cache_meta.get("rows"),
+            "provider": cache_meta.get("provider"),
+            "source": cache_meta.get("source"),
+            "adjustment": cache_meta.get("adjustment"),
+            "fallback_reason": cache_meta.get("fallback_reason"),
+        }
+    ]
 
 
 def _append_crypto_perpetual_warning(ctx: _RunContext) -> list[str]:

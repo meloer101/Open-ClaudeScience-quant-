@@ -33,6 +33,7 @@ def build_research_note(
         chart_block = ""
 
     cache = config.get("cache") or {}
+    data_slices = config.get("data_slices") or []
 
     return f"""# Research Note
 {warning_block}
@@ -43,6 +44,8 @@ def build_research_note(
 
 ## 数据
 - 数据来源: {cache.get("source", "unknown")}
+- 数据分片: {_data_slice_summary(data_slices)}
+- 复权/调整: {_adjustment_summary(data_slices, cache)}
 - 数据版本 hash: `{data_hash}`
 
 ## 结果
@@ -98,6 +101,8 @@ def build_cross_sectional_research_note(
 
     metrics_rows = _metrics_rows(metrics, metrics_ci)
     cache = config.get("cache") or {}
+    data_slices = config.get("data_slices") or []
+    funding = config.get("funding") or {}
     universe = config.get("universe") or {}
     quality_rows = "\n".join(
         f"| {key} | {value if not isinstance(value, (list, dict)) else len(value)} |"
@@ -122,6 +127,9 @@ def build_cross_sectional_research_note(
 
 ## 数据
 - 数据来源统计: {cache.get("sources", {})}
+- 数据分片: {_data_slice_summary(data_slices)}
+- 复权/调整: {_adjustment_summary(data_slices, cache)}
+- Funding 数据来源统计: {funding.get("sources", {})}
 - 数据版本 hash: `{data_hash}`
 
 ## 数据质量
@@ -271,3 +279,29 @@ def _metrics_rows(metrics: dict[str, float], metrics_ci: dict[str, dict[str, flo
         else:
             rows.append(f"| {key} | {value} |")
     return "\n".join(rows)
+
+
+def _data_slice_summary(data_slices: list[dict]) -> str:
+    if not data_slices:
+        return "未记录分片"
+    total_rows = sum(int(item.get("rows") or 0) for item in data_slices)
+    return f"{len(data_slices)} slices / {total_rows} rows"
+
+
+def _adjustment_summary(data_slices: list[dict], cache: dict) -> str:
+    adjustments = []
+    for item in data_slices:
+        adjustment = item.get("adjustment")
+        if isinstance(adjustment, dict):
+            adjustments.append(
+                f"{adjustment.get('method', 'unknown')}, dividend_reinvested={adjustment.get('dividend_reinvested')}"
+            )
+    if not adjustments and isinstance(cache.get("adjustment"), dict):
+        adjustment = cache["adjustment"]
+        adjustments.append(
+            f"{adjustment.get('method', 'unknown')}, dividend_reinvested={adjustment.get('dividend_reinvested')}"
+        )
+    if not adjustments:
+        return "unknown"
+    unique = sorted(set(adjustments))
+    return "; ".join(unique[:3])
