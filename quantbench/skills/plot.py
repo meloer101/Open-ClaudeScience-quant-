@@ -62,3 +62,20 @@ def save_ic_plot(ic_series: pd.Series, path: Path) -> Path:
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path
+
+
+def save_risk_attribution_plot(comparison: dict, path: Path) -> Path:
+    labels = ["raw_sharpe", "neutralized_sharpe", "exposure_decay"]
+    raw = float(comparison.get("raw_sharpe") or 0.0)
+    neutralized = float(comparison.get("neutralized_sharpe") or 0.0)
+    values = [raw, neutralized, raw - neutralized]
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(labels, values, color=["#2563eb", "#0f766e", "#dc2626"])
+    ax.axhline(0, color="#111827", linewidth=0.8, alpha=0.5)
+    ax.set_title("Risk Attribution Proxy")
+    ax.set_ylabel("Sharpe contribution proxy")
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path

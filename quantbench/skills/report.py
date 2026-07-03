@@ -34,6 +34,7 @@ def build_research_note(
 
     cache = config.get("cache") or {}
     data_slices = config.get("data_slices") or []
+    execution = config.get("execution") or {}
 
     return f"""# Research Note
 {warning_block}
@@ -47,6 +48,10 @@ def build_research_note(
 - 数据分片: {_data_slice_summary(data_slices)}
 - 复权/调整: {_adjustment_summary(data_slices, cache)}
 - 数据版本 hash: `{data_hash}`
+
+## 执行假设
+- 信号时间: {execution.get("signal_time", "close_t")}
+- 成交价格: {execution.get("fill_price", "close_t")}
 
 ## 结果
 | 指标 | 数值 |
@@ -105,10 +110,22 @@ def build_cross_sectional_research_note(
     data_slices = config.get("data_slices") or []
     funding = config.get("funding") or {}
     universe = config.get("universe") or {}
+    execution = config.get("execution") or {}
+    capacity_curve = config.get("capacity_curve") or []
+    long_short = config.get("long_short_contribution") or {}
+    neutralization_comparison = config.get("neutralization_comparison") or {}
     quality_rows = "\n".join(
         f"| {key} | {value if not isinstance(value, (list, dict)) else len(value)} |"
         for key, value in data_quality.items()
     )
+    capacity_rows = "\n".join(
+        f"| {row.get('aum_usd')} | {row.get('sharpe')} | {row.get('average_fill_ratio')} | {row.get('total_liquidity_cost')} |"
+        for row in capacity_curve
+    )
+    neutralization_rows = "\n".join(
+        f"| {key} | {value} |" for key, value in neutralization_comparison.items()
+    )
+    risk_attribution_image = "\n![risk attribution](risk_attribution.png)" if neutralization_comparison else ""
 
     return f"""# Cross-Sectional Research Note
 {warning_block}
@@ -133,6 +150,24 @@ def build_cross_sectional_research_note(
 - Funding 数据来源统计: {funding.get("sources", {})}
 - 数据版本 hash: `{data_hash}`
 
+## 执行与现实性假设
+- 信号时间: {execution.get("signal_time", "close_t")}
+- 成交价格: {execution.get("fill_price", "close_t")}
+- 成本模型: {config.get("cost_model", "fixed_bps")}
+- 做空/borrow: {config.get("borrow_model", "not_applied")}
+- 中性化: {", ".join(config.get("neutralize") or []) or "off"}
+- 多空贡献: long={long_short.get("long_contribution", "n/a")}, short={long_short.get("short_contribution", "n/a")}, short_share={long_short.get("short_share", "n/a")}
+
+### 容量曲线
+| AUM USD | Sharpe | 平均满仓率 | 流动性成本 |
+|---:|---:|---:|---:|
+{capacity_rows or "| (not estimated) | - | - | - |"}
+
+### 中性化对比
+| 项 | 数值 |
+|---|---:|
+{neutralization_rows or "| (not run) | - |"}
+
 ## 数据质量
 | 项 | 数值 |
 |---|---:|
@@ -148,6 +183,7 @@ def build_cross_sectional_research_note(
 ![drawdown](drawdown.png)
 ![group returns](group_returns.png)
 ![rank ic](rank_ic.png)
+{risk_attribution_image}
 
 ## Reviewer 审查报告
 {review_markdown or "(未运行 Reviewer 审查)"}

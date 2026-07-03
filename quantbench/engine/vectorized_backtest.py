@@ -11,6 +11,7 @@ from quantbench.engine.metrics import (
     information_coefficient,
     periods_per_year_from_timestamps,
 )
+from quantbench.engine.execution import ExecutionConfig, forward_returns_for_execution
 
 
 @dataclass
@@ -21,11 +22,13 @@ class BacktestResult:
     drawdown: pd.Series
     position: pd.Series
     turnover: pd.Series
+    execution: ExecutionConfig
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "metrics": self.metrics,
             "metrics_ci": metrics_ci(self.returns),
+            "execution": self.execution.to_dict(),
             "series": {
                 "timestamp": [str(item) for item in self.returns.index],
                 "returns": self.returns.fillna(0).round(10).tolist(),
@@ -37,13 +40,19 @@ class BacktestResult:
         }
 
 
-def run_vectorized_backtest(price_df: pd.DataFrame, signal: pd.Series, cost_bps: float) -> BacktestResult:
+def run_vectorized_backtest(
+    price_df: pd.DataFrame,
+    signal: pd.Series,
+    cost_bps: float,
+    execution: ExecutionConfig | None = None,
+) -> BacktestResult:
+    execution = execution or ExecutionConfig()
     df = price_df.reset_index(drop=True).copy()
     signal = signal.reset_index(drop=True)
     timestamps = pd.to_datetime(df["timestamp"], utc=True)
     ppy = periods_per_year_from_timestamps(timestamps)
 
-    forward_returns = df["close"].pct_change().shift(-1)
+    forward_returns = forward_returns_for_execution(df, execution)
     position = _derive_position(signal)
     # position[t] is already causal (derived only from data known by close of bar t),
     # and forward_returns[t] already represents the t->t+1 return, so no additional
@@ -73,6 +82,7 @@ def run_vectorized_backtest(price_df: pd.DataFrame, signal: pd.Series, cost_bps:
         drawdown=drawdown,
         position=position,
         turnover=turnover,
+        execution=execution,
     )
 
 
