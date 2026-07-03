@@ -1,10 +1,11 @@
 import difflib
 import json
+import math
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,15 +33,18 @@ from quantbench.data.warehouse import fetch_universe_ohlcv
 from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backtest
 from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
-from quantbench.review import CriticReport, ReviewReport, run_critic, run_review
+from quantbench.review import CriticReport, ReviewFinding, ReviewReport, determine_verdict, run_critic, run_review
+from quantbench.review.report import _dsr_finding, _pbo_finding
 from quantbench.factors.parametrize import apply_overrides
 from quantbench.factors.store import FactorStore
 from quantbench.library.aggregate import summarize as summarize_library
 from quantbench.library.fork import build_fork_config
 from quantbench.library.index import ExperimentIndex
+from quantbench.library.trials import count_trials, universe_signature
 from quantbench.monitor.pipeline import check_run_decay
 from quantbench.portfolio.optimize import PORTFOLIO_METHODS
 from quantbench.portfolio.pipeline import run_portfolio_pipeline
+from quantbench.review.pbo import PBOResult, probability_of_backtest_overfitting
 from quantbench.skilldocs.inject import build_augmented_system_prompt
 from quantbench.skilldocs.registry import SkillRegistryDocs
 from quantbench.skills.codeexec import load_signal_function, run_signal_code
@@ -524,6 +528,9 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
         benchmark_returns = _fetch_benchmark_returns(
             {"symbol": benchmark_symbol, "timeframe": timeframe, "start": start, "end": end}, None
         )
+        signature = universe_signature(ctx.universe.to_dict())
+        trial_count = count_trials(signature, start, end)
+        effective_trials = len(normalized) + trial_count.prior_trials
         summary_items: list[dict[str, Any]] = []
         max_workers = min(len(normalized), SCREEN_MAX_WORKERS)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -544,23 +551,40 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
                     n_groups,
                     cost_bps,
                     benchmark_returns,
+                    effective_trials,
                 )
                 for candidate in normalized
             ]
             for future in as_completed(futures):
                 summary_items.append(future.result())
 
+        # Second pass: now that every sibling candidate's Sharpe is known, the
+        # DSR can finally use the *cross-trial* Sharpe dispersion (its whole
+        # point) instead of the single-series analytic fallback used in the
+        # per-candidate first pass, and the batch-level PBO can be folded in.
+        # Both re-derive the verdict, so they must happen together here rather
+        # than inside the parallel per-candidate review.
+        trial_sharpes = _screen_trial_sharpes(summary_items)
+        pbo_result = _screen_pbo(summary_items)
+        for item in summary_items:
+            if item.get("status") == "completed":
+                _finalize_screen_item(item, trial_sharpes, effective_trials, pbo_result)
         summary_items.sort(key=_screen_sort_key, reverse=True)
+        public_items = [_public_screen_item(item) for item in summary_items]
         payload = {
             "parent_run_id": run.run_id,
             "universe": ctx.universe.to_dict(),
+            "universe_signature": signature,
             "start": start,
             "end": end,
             "timeframe": timeframe,
             "n_groups": n_groups,
             "cost_bps": cost_bps,
+            "effective_trials": effective_trials,
+            "trial_count": asdict(trial_count),
+            "pbo": asdict(pbo_result) if pbo_result is not None else None,
             "critic_model": str(getattr(critic_llm, "model", CRITIC_MODEL)),
-            "candidates": summary_items,
+            "candidates": public_items,
         }
         run.save_json("factor_screen_summary.json", payload)
         ctx.screened = True
@@ -745,6 +769,7 @@ def _run_screen_candidate(
     n_groups: int,
     cost_bps: float,
     benchmark_returns: Any,
+    effective_trials: int,
 ) -> dict[str, Any]:
     child = run_store.create_run(f"Screen factor {candidate['name']} from {parent_run_id}")
     critic_model = str(getattr(critic_llm, "model", CRITIC_MODEL))
@@ -766,6 +791,9 @@ def _run_screen_candidate(
             "model": model,
             "critic_model": critic_model,
             "universe": universe.to_dict(),
+            "start": start,
+            "end": end,
+            "timeframe": timeframe,
             "parent_run_id": parent_run_id,
             "screen_candidate": candidate["name"],
         }
@@ -799,6 +827,7 @@ def _run_screen_candidate(
             factor_panel=backtest.factor_panel,
             n_groups=n_groups,
             turnover_annual=backtest.metrics.get("turnover_annual"),
+            n_trials=effective_trials,
         )
         ctx.review_report = review_report
         child.save_json("review_report.json", review_report.to_dict())
@@ -833,6 +862,9 @@ def _run_screen_candidate(
             "data_path": str(panel_path),
             "cache": cache_meta,
             "universe": universe.to_dict(),
+            "start": start,
+            "end": end,
+            "timeframe": timeframe,
             "parent_run_id": parent_run_id,
             "screen_candidate": candidate["name"],
         }
@@ -847,6 +879,7 @@ def _run_screen_candidate(
             ctx.data_quality.to_dict(),
             review_report.to_markdown(),
             ctx.critic_report.to_markdown() if ctx.critic_report else "",
+            metrics_ci=_metrics_ci_for_run(child.run_dir),
         )
         child.save_text("research_note.md", note)
         child.save_json("conversation.json", [])
@@ -863,7 +896,11 @@ def _run_screen_candidate(
             critic=ctx.critic_report.to_dict() if ctx.critic_report else None,
             parent_run_id=parent_run_id,
         )
-        return _screen_item(candidate["name"], child.run_id, "completed", backtest.metrics, review_report, ctx.critic_report)
+        item = _screen_item(candidate["name"], child.run_id, "completed", backtest.metrics, review_report, ctx.critic_report)
+        item["_returns"] = backtest.returns
+        item["_review_report"] = review_report
+        item["_run_dir"] = child.run_dir
+        return item
     except Exception as exc:
         child.save_json("error.json", {"traceback": traceback.format_exc()})
         return {
@@ -886,6 +923,7 @@ def _screen_item(
     review_report: ReviewReport,
     critic_report: CriticReport | None,
 ) -> dict[str, Any]:
+    dsr = _finding_detail(review_report, "deflated_sharpe")
     return {
         "name": name,
         "run_id": run_id,
@@ -894,7 +932,90 @@ def _screen_item(
         "critic_verdict": critic_report.verdict if critic_report else None,
         "critic_agrees": critic_report.agrees_with_deterministic_verdict if critic_report else None,
         "sharpe": metrics.get("sharpe"),
+        "dsr": dsr,
     }
+
+
+def _finding_detail(review_report: ReviewReport, check: str) -> dict[str, Any] | None:
+    for finding in review_report.findings:
+        if finding.check == check:
+            return finding.detail
+    return None
+
+
+def _public_screen_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+def _screen_trial_sharpes(items: list[dict[str, Any]]) -> list[float]:
+    """Every completed sibling's annualized Sharpe - the empirical cross-trial
+    dispersion the DSR needs (deflated_sharpe_ratio de-annualizes internally)."""
+    sharpes: list[float] = []
+    for item in items:
+        if item.get("status") != "completed":
+            continue
+        sharpe = item.get("sharpe")
+        if sharpe is not None and math.isfinite(float(sharpe)):
+            sharpes.append(float(sharpe))
+    return sharpes
+
+
+def _screen_pbo(items: list[dict[str, Any]]) -> PBOResult | None:
+    columns = {}
+    for item in items:
+        returns = item.get("_returns")
+        if item.get("status") == "completed" and isinstance(returns, pd.Series):
+            columns[str(item["name"])] = returns
+    if not columns:
+        return None
+    matrix = pd.DataFrame(columns).sort_index().fillna(0.0)
+    return probability_of_backtest_overfitting(matrix)
+
+
+def _finalize_screen_item(
+    item: dict[str, Any],
+    trial_sharpes: list[float],
+    effective_trials: int,
+    pbo_result: PBOResult | None,
+) -> None:
+    review_report = item.get("_review_report")
+    returns = item.get("_returns")
+    run_dir = item.get("_run_dir")
+    if not isinstance(review_report, ReviewReport) or not isinstance(run_dir, Path):
+        return
+
+    # Recompute the DSR finding with the sibling Sharpes now known, and replace
+    # the first-pass finding that used only the analytic single-series fallback.
+    findings: list[ReviewFinding] = []
+    if isinstance(returns, pd.Series):
+        dsr_finding = _dsr_finding(returns, effective_trials, trial_sharpes)
+        findings = [dsr_finding if f.check == "deflated_sharpe" else f for f in review_report.findings]
+    else:
+        findings = list(review_report.findings)
+    if pbo_result is not None:
+        findings.append(_pbo_finding(pbo_result))
+
+    verdict, reason = determine_verdict(findings)
+    updated = ReviewReport(findings=findings, verdict=verdict, verdict_reason=reason)
+    item["_review_report"] = updated
+    item["verdict"] = verdict
+    item["dsr"] = _finding_detail(updated, "deflated_sharpe")
+    # The Critic ran against the first-pass verdict; re-derive its agreement flag
+    # against the final verdict so critic_agrees never points at a stale verdict.
+    critic_verdict = item.get("critic_verdict")
+    item["critic_agrees"] = (critic_verdict == verdict) if critic_verdict is not None else None
+
+    (run_dir / "review_report.json").write_text(json.dumps(updated.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_path = run_dir / "manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["review"] = updated.to_dict()
+        existing_warnings = list(manifest.get("warnings") or [])
+        for message in _review_warning_messages(updated):
+            if message not in existing_warnings:
+                existing_warnings.append(message)
+        manifest["warnings"] = existing_warnings
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _screen_sort_key(item: dict[str, Any]) -> tuple[int, float]:
@@ -1075,6 +1196,7 @@ def _run_portfolio_optimization(
         summary,
         outcome.review_report.to_markdown(),
         ctx.critic_report.to_markdown() if ctx.critic_report else "",
+        metrics_ci=_metrics_ci_for_run(child.run_dir),
     )
     child.save_text("research_note.md", note)
     child.save_json("conversation.json", [])
@@ -1347,6 +1469,7 @@ class Coordinator:
                 ctx.data_quality.to_dict() if ctx.data_quality else None,
                 ctx.review_report.to_markdown() if ctx.review_report else "",
                 ctx.critic_report.to_markdown() if ctx.critic_report else "",
+                metrics_ci=_metrics_ci_for_run(run.run_dir),
             )
         else:
             note = build_research_note(
@@ -1358,6 +1481,7 @@ class Coordinator:
                 summary,
                 ctx.review_report.to_markdown() if ctx.review_report else "",
                 ctx.critic_report.to_markdown() if ctx.critic_report else "",
+                metrics_ci=_metrics_ci_for_run(run.run_dir),
             )
         run.save_text("research_note.md", note)
         run.save_json("conversation.json", messages)
@@ -1571,6 +1695,7 @@ class Coordinator:
             ctx.review_report.to_markdown() if ctx.review_report else "",
             ctx.critic_report.to_markdown() if ctx.critic_report else "",
             _fork_lineage_markdown(parent_run_id, seed_config.get("parent_signal_code", ""), code_path, metrics),
+            metrics_ci=_metrics_ci_for_run(run.run_dir),
         )
         run.save_text("research_note.md", note)
         run.save_json("conversation.json", messages)
@@ -1702,6 +1827,18 @@ def _review_warning_messages(review_report: ReviewReport) -> list[str]:
         if finding.severity in {"critical", "warning"}:
             messages.append(f"Reviewer {finding.severity.upper()} [{finding.check}]: {finding.message}")
     return messages
+
+
+def _metrics_ci_for_run(run_dir: Path) -> dict[str, dict[str, float]] | None:
+    path = run_dir / "backtest_result.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    metrics_ci = payload.get("metrics_ci")
+    return metrics_ci if isinstance(metrics_ci, dict) else None
 
 
 def _fork_lineage_markdown(parent_run_id: str, parent_signal_code: str, child_signal_path: Path, child_metrics: dict[str, float]) -> str:

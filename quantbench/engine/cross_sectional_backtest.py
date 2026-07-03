@@ -6,6 +6,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from quantbench.review.bootstrap import metrics_ci
 from quantbench.engine.metrics import (
     annualized_return,
     annualized_sharpe,
@@ -29,6 +30,7 @@ class CrossSectionalBacktestResult:
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "metrics": self.metrics,
+            "metrics_ci": metrics_ci(self.returns),
             "series": {
                 "timestamp": [str(item) for item in self.returns.index],
                 "long_short_returns": self.returns.fillna(0).round(10).tolist(),
@@ -187,5 +189,4 @@ def _cross_sectional_ic(factor_panel: pd.DataFrame, method: str) -> pd.Series:
         corr = clean["factor"].corr(clean["forward_return"], method=method)
         values[timestamp] = 0.0 if pd.isna(corr) else float(corr)
     return pd.Series(values).sort_index()
-
 
