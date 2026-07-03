@@ -155,6 +155,57 @@ def read_backtest_result(run_id: str) -> dict[str, Any] | None:
     return None
 
 
+def read_returns_series(run_id: str) -> pd.Series | None:
+    """A run's own net return series, keyed by timestamp. Single-symbol and
+    portfolio-optimization runs key it "returns"; cross-sectional runs key it
+    "long_short_returns" (see BacktestResult/CrossSectionalBacktestResult/
+    CombinedPortfolio.to_json_dict()). Shared by library/compare.py's
+    correlation matrix and quantbench/portfolio/'s constituent-return reader
+    so both read the exact same series the same way."""
+    result = read_backtest_result(run_id)
+    if result is None:
+        return None
+    series = result.get("series") or {}
+    timestamps = series.get("timestamp")
+    values = series.get("returns") if "returns" in series else series.get("long_short_returns")
+    if not timestamps or not values or len(timestamps) != len(values):
+        return None
+    return pd.Series(values, index=pd.to_datetime(timestamps, utc=True, errors="coerce")).dropna()
+
+
+def infer_asset_class(run_id: str) -> str | None:
+    """Best-effort asset class for a run, used by portfolio optimization's
+    compatibility gate (crypto and equity return series should never be fed
+    into the same covariance matrix - they don't even share a trading
+    calendar). Cross-sectional runs record universe.asset_class directly;
+    portfolio-optimization runs record a top-level config.asset_class (not
+    nested under "universe" - see coordinator._run_portfolio_optimization);
+    single-symbol runs record neither, so this falls back to the data
+    provider name in config.cache (ccxt_* means crypto, yfinance_equity means
+    equity - see quantbench/data/exchange.py's select_provider). Returns None
+    (not a guess) when nothing here resolves it - callers must treat that as
+    "unknown", never as "safe to assume equity"."""
+    config = read_config(run_id) or {}
+    universe = config.get("universe")
+    if universe and universe.get("asset_class"):
+        return universe["asset_class"]
+    if config.get("asset_class"):
+        return str(config["asset_class"])
+    provider = str((config.get("cache") or {}).get("provider", ""))
+    if provider.startswith("ccxt"):
+        return "crypto"
+    if provider == "yfinance_equity":
+        return "equity"
+    return None
+
+
+def read_portfolio_summary(run_id: str) -> dict[str, Any] | None:
+    path = run_dir_for(run_id) / "portfolio_summary.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 PARQUET_PREVIEW_ROW_LIMIT = 200
 
 

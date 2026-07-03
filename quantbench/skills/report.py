@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 
 
 def build_research_note(
@@ -155,4 +156,103 @@ def build_cross_sectional_research_note(
 
 ## 代码
 完整可复现因子代码见 `signal.py`；universe 定义见 `universe.yaml`。
+"""
+
+
+def build_portfolio_research_note(
+    run_id: str,
+    config: dict,
+    outcome: Any,
+    warnings: list[str] | None = None,
+    summary: str = "",
+    review_markdown: str = "",
+    critic_markdown: str = "",
+) -> str:
+    """`outcome` is a quantbench.portfolio.pipeline.PortfolioOptimizationOutcome.
+    Typed as Any here (rather than importing the dataclass) to avoid
+    quantbench.skills depending on quantbench.portfolio - report-building stays
+    a leaf module, matching how build_research_note/build_cross_sectional_research_note
+    only take plain dicts/strings, never engine result objects."""
+    warnings = warnings or []
+    warning_block = ""
+    if warnings:
+        bullet_list = "\n".join(f"- {w}" for w in warnings)
+        warning_block = f"""
+## ⚠️ 组合优化警告
+{bullet_list}
+
+---
+"""
+
+    metrics = outcome.combined.metrics
+    metrics_rows = "\n".join(f"| {key} | {value} |" for key, value in metrics.items())
+    weight_rows = "\n".join(f"| {run_id_} | {weight:.4f} |" for run_id_, weight in outcome.weights.items())
+
+    comparison_rows = "\n".join(
+        f"| {method} | {row['train_sharpe']} | {row['test_sharpe'] if row['test_sharpe'] is not None else '-'} | "
+        f"{'✓ 已选中' if method == outcome.selected_method else ''} |"
+        for method, row in outcome.comparison_table.items()
+    )
+
+    correlation_rows = "\n".join(
+        f"| {run_a} | " + " | ".join(f"{outcome.correlation.get(run_a, {}).get(run_b, '')}" for run_b in outcome.correlation)
+        for run_a in outcome.correlation
+    )
+    correlation_header = "| | " + " | ".join(outcome.correlation.keys()) + " |"
+
+    return f"""# Portfolio Optimization Research Note
+{warning_block}
+**Run ID:** {run_id}
+**Date:** {datetime.now(timezone.utc).date().isoformat()}
+**Model:** {config.get("model", "unknown")}
+**Hypothesis:** {config.get("hypothesis", "")}
+**成分 run_id:** {", ".join(config.get("constituent_run_ids", []))}
+
+## 组合优化
+- 选中方法: **{outcome.selected_method}**（默认稳健法；max_sharpe 无论是否被选中，都只作为对照，不是推荐）
+- 训练/测试切分点: {outcome.train_test_split_index}
+- 重叠观测数: {outcome.overlap_observations}
+- 多样化比率（加权平均波动 / 组合波动，越大于 1 说明组合分散效果越好）: {metrics.get("diversification_ratio")}
+
+### 权重（在训练集上拟合，样本外表现见下方对照表）
+| run_id | 权重 |
+|---|---:|
+{weight_rows}
+
+### 方法对照表（诚实机器：max_sharpe 样本内通常最好看，样本外常常反而更差）
+| 方法 | 样本内夏普 | 样本外夏普 | |
+|---|---:|---:|---|
+{comparison_rows}
+
+### 成分因子相关性矩阵
+{correlation_header}
+|{"---|" * (len(outcome.correlation) + 1)}
+{correlation_rows}
+
+## 组合结果（全样本，使用训练集拟合的固定权重）
+| 指标 | 数值 |
+|---|---:|
+{metrics_rows}
+
+## 图表
+![equity curve](equity_curve.png)
+![drawdown](drawdown.png)
+
+## Reviewer 审查报告
+{review_markdown or "(未运行 Reviewer 审查)"}
+
+## Critic Agent 独立复核
+{critic_markdown or "(未运行 Critic Agent 独立复核)"}
+
+## Coordinator 总结
+{summary or "(未生成总结)"}
+
+## 局限性声明
+- 组合优化不做杠杆/做空，权重恒定在 [0, max_weight] 且和为 1；不做滚动再配权（一次 train 拟合，test 上固定权重）。
+- 换手率/成本只按权重再平衡漂移估算，不建模各成分因子底层持仓的交易成本。
+- 被选中方法的样本内夏普存在选择偏差（从多个方法/候选中挑出来的），不代表统计显著；对照表和样本外表现是判断是否过拟合的主要依据，不是样本内数字本身。
+- Reviewer 是确定性启发式检查，不是形式化证明；未被标记不代表没有过拟合。
+
+## 代码
+组合权重见 `portfolio_weights.json`；完整方法对照与诊断见 `portfolio_summary.json`；组合收益序列见 `backtest_result.json`。
 """

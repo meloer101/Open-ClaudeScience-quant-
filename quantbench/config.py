@@ -16,6 +16,17 @@ MAX_STEPS = 12
 SCREEN_MAX_CANDIDATES = 20
 SCREEN_MAX_WORKERS = 4
 
+# Risk parity (not max-sharpe) is the default: it never estimates expected
+# returns, only covariance, which is the more reliably-estimated of the two
+# inputs to portfolio optimization over a short factor-return history. See
+# PHASE9.md section 1 for the full argument and academic references.
+PORTFOLIO_DEFAULT_METHOD = "risk_parity"
+PORTFOLIO_TRAIN_TEST_SPLIT = 0.7
+PORTFOLIO_MAX_WEIGHT = 0.60
+PORTFOLIO_MIN_FACTORS = 2
+PORTFOLIO_MAX_FACTORS = 20
+PORTFOLIO_MIN_OVERLAP_OBS = 60
+
 
 def _load_dotenv() -> None:
     env_path = PROJECT_ROOT / ".env"

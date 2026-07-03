@@ -120,7 +120,10 @@ def _extract_oos_sharpe(findings: list[dict[str, Any]]) -> float | None:
 
 def _classify_asset(config: dict[str, Any]) -> str:
     universe = config.get("universe") or {}
-    explicit = universe.get("asset_class")
+    # Portfolio-optimization runs record asset_class at the top level, not
+    # nested under "universe" (they aren't a cross-sectional universe run -
+    # see quantbench/agent/coordinator.py's _run_portfolio_optimization).
+    explicit = universe.get("asset_class") or config.get("asset_class")
     if explicit:
         return str(explicit)
 

@@ -3,6 +3,7 @@ import type { RunDetail, RunEvent } from "../types";
 import { WarningBanner } from "./WarningBanner";
 import { ArtifactGallery } from "./ArtifactGallery";
 import { LiveProgress } from "./LiveProgress";
+import { PortfolioSummaryPanel } from "./PortfolioSummaryPanel";
 
 interface ChatMessageProps {
   run: RunDetail;
@@ -45,6 +46,7 @@ export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifac
     (artifact) =>
       artifact.filename === "backtest_result.json" || artifact.filename === LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME,
   );
+  const isPortfolioRun = run.artifacts.some((artifact) => artifact.filename === "portfolio_summary.json");
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -68,6 +70,7 @@ export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifac
           <>
             <WarningBanner warnings={run.warnings} />
             <MetricsTable metrics={run.metrics} />
+            {isPortfolioRun && <PortfolioSummaryPanel runId={run.run_id} />}
             <div className="prose prose-sm max-w-none">
               <Markdown>{run.summary}</Markdown>
             </div>

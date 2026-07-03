@@ -31,6 +31,9 @@ def main(args: tuple[str, ...]) -> None:
     if args[0] == "compare":
         _compare(args[1:])
         return
+    if args[0] == "portfolio":
+        _portfolio(args[1:])
+        return
     _run_request(" ".join(args), forced_skills)
 
 
@@ -70,6 +73,48 @@ def _compare(args: tuple[str, ...]) -> None:
         click.echo(json.dumps(table, ensure_ascii=False, indent=2))
         return
     _echo_compare_table(table)
+
+
+_PORTFOLIO_VALUE_OPTIONS = ("--method", "--cost-bps", "--split", "--max-weight")
+
+
+def _portfolio(args: tuple[str, ...]) -> None:
+    if not args:
+        raise click.UsageError("portfolio requires a subcommand: optimize")
+    command = args[0]
+    if command != "optimize":
+        raise click.UsageError(f"unknown portfolio subcommand: {command}")
+    rest = args[1:]
+    # Unlike _compare's only flag (--json-output, no value), portfolio optimize
+    # has several space-separated value options (--method min_variance, etc.) -
+    # a plain "not startswith('--')" filter would swallow the option's value as
+    # a spurious extra run_id, so option names and the token right after them
+    # both have to be excluded from the run_id list.
+    run_ids = []
+    skip_next = False
+    for arg in rest:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("--"):
+            if "=" not in arg and arg in _PORTFOLIO_VALUE_OPTIONS:
+                skip_next = True
+            continue
+        run_ids.append(arg)
+    if not run_ids:
+        raise click.UsageError("portfolio optimize requires at least two run_ids")
+    method = _option_value(rest, "--method")
+    cost_bps_value = _option_value(rest, "--cost-bps")
+    split_value = _option_value(rest, "--split")
+    max_weight_value = _option_value(rest, "--max-weight")
+    result = Coordinator().optimize_portfolio(
+        run_ids,
+        method=method,
+        cost_bps=float(cost_bps_value) if cost_bps_value is not None else None,
+        split=float(split_value) if split_value is not None else None,
+        max_weight=float(max_weight_value) if max_weight_value is not None else None,
+    )
+    _echo_run_result(result)
 
 
 def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:

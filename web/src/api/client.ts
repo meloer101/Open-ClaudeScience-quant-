@@ -4,6 +4,7 @@ import type {
   ExperimentRecord,
   LineageResult,
   ParquetPreview,
+  PortfolioSummary,
   ReviewReportPayload,
   RunDetail,
   RunSummary,
@@ -104,6 +105,13 @@ export async function getBacktestResult(runId: string): Promise<BacktestResultPa
 
 export function getReviewReport(runId: string): Promise<ReviewReportPayload | null> {
   return fetchArtifactJson<ReviewReportPayload>(runId, "review_report.json");
+}
+
+export async function getPortfolioSummary(runId: string): Promise<PortfolioSummary | null> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/portfolio`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json() as Promise<PortfolioSummary>;
 }
 
 export function previewParquet(runId: string, filename: string): Promise<ParquetPreview> {

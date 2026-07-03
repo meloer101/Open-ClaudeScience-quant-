@@ -164,6 +164,18 @@ def get_lineage(run_id: str):
         raise HTTPException(status_code=404, detail="run not found") from None
 
 
+@app.get("/api/runs/{run_id}/portfolio")
+def get_portfolio_summary(run_id: str):
+    """portfolio_summary.json for an optimize_portfolio run: method comparison
+    table (in-sample vs out-of-sample Sharpe per method), weights, correlation
+    matrix, diversification ratio. 404s for any run that isn't a portfolio run,
+    same convention as /backtest-result."""
+    summary = run_reader.read_portfolio_summary(run_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="portfolio summary not found")
+    return summary
+
+
 @app.get("/api/runs/{run_id}/backtest-result")
 def get_backtest_result(run_id: str):
     """The ChartsPanel's one entry point for a run's backtest result JSON.

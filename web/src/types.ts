@@ -108,6 +108,31 @@ export interface ReviewReportPayload {
   findings: ReviewFindingPayload[];
 }
 
+// Mirrors portfolio_summary.json, written by _run_portfolio_optimization
+// (quantbench/agent/coordinator.py) for optimize_portfolio runs.
+export interface PortfolioMethodComparison {
+  weights: Record<string, number>;
+  diagnostics: Record<string, unknown>;
+  train_sharpe: number;
+  test_sharpe: number | null;
+  train_observations: number;
+  test_observations: number;
+}
+
+export interface PortfolioSummary {
+  parent_run_id: string | null;
+  constituent_run_ids: string[];
+  asset_class: string;
+  selected_method: string;
+  comparison_table: Record<string, PortfolioMethodComparison>;
+  correlation: Record<string, Record<string, number | null>>;
+  diversification_ratio: number | null;
+  overlap_observations: number;
+  train_test_split_index: string;
+  cost_bps: number;
+  max_weight: number;
+}
+
 export interface ParquetPreview {
   columns: string[];
   rows: Record<string, unknown>[];
