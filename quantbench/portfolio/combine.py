@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from quantbench.engine.metrics import annualized_return, annualized_sharpe, compute_drawdown, periods_per_year_from_timestamps
+from quantbench.review.bootstrap import metrics_ci
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class CombinedPortfolio:
         # ChartsPanel - works on a portfolio run without any special-casing.
         return {
             "metrics": self.metrics,
+            "metrics_ci": metrics_ci(self.returns),
             "series": {
                 "timestamp": [str(item) for item in self.returns.index],
                 "returns": self.returns.fillna(0).round(10).tolist(),

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from quantbench.api import run_reader
+from quantbench.library.trials import universe_signature
 
 
 FACTOR_FAMILY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -40,6 +41,9 @@ class ExperimentRecord:
     critical_count: int
     warning_count: int
     parent_run_id: str | None
+    universe_signature: str | None = None
+    window_start: str | None = None
+    window_end: str | None = None
     error_summary: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,6 +81,9 @@ def build_record(run_id: str) -> ExperimentRecord:
         critical_count=sum(1 for finding in findings if str(finding.get("severity", "")).lower() == "critical"),
         warning_count=sum(1 for finding in findings if str(finding.get("severity", "")).lower() == "warning"),
         parent_run_id=parent_run_id,
+        universe_signature=universe_signature(config.get("universe")) if config.get("universe") else None,
+        window_start=_window_value(config, "start"),
+        window_end=_window_value(config, "end"),
         error_summary=_error_summary(run_id) if status == "failed" else None,
     )
 
@@ -144,6 +151,15 @@ def _classify_asset(config: dict[str, Any]) -> str:
     if symbols and all(re.fullmatch(r"[A-Z.]{1,6}", str(symbol)) for symbol in symbols[:20]):
         return "equity"
     return "unknown"
+
+
+def _window_value(config: dict[str, Any], key: str) -> str | None:
+    value = config.get(key)
+    if value:
+        return str(value)
+    fetch_params = config.get("fetch_params") or {}
+    value = fetch_params.get(key)
+    return str(value) if value else None
 
 
 def _classify_factor_family(config: dict[str, Any], hypothesis: str) -> str:

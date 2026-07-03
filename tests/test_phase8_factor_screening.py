@@ -31,6 +31,28 @@ def _panel() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _wide_panel(rows: int = 96) -> pd.DataFrame:
+    timestamps = pd.date_range("2024-01-01", periods=rows, freq="1D", tz="UTC")
+    panel_rows = []
+    for symbol_index, symbol in enumerate(["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"]):
+        base = 100 + symbol_index * 7
+        trend = 1 + symbol_index * 0.01
+        closes = base + pd.Series(range(rows), dtype="float64").mul(trend).to_numpy()
+        for timestamp, close in zip(timestamps, closes, strict=True):
+            panel_rows.append(
+                {
+                    "symbol": symbol,
+                    "timestamp": timestamp,
+                    "open": close,
+                    "high": close + 1,
+                    "low": close - 1,
+                    "close": close,
+                    "volume": 1000 + symbol_index,
+                }
+            )
+    return pd.DataFrame(panel_rows)
+
+
 class JsonCriticLLM:
     def chat(self, messages, tools=None):
         payload = {
@@ -113,6 +135,58 @@ def test_screen_factors_creates_child_runs_parent_links_and_sorted_summary(tmp_p
         assert child_manifest["parent_run_id"] == result.run_id
         assert child_manifest["critic_model"]
         assert child_manifest["critic"]["status"] == "ok"
+
+
+def test_screen_factors_writes_phase10_statistical_guardrails(tmp_path: Path, monkeypatch):
+    from quantbench.agent.coordinator import Coordinator
+    from quantbench.artifact.store import ArtifactStore
+
+    panel = _wide_panel()
+    _patch_universe_and_panel(monkeypatch, panel)
+    monkeypatch.setattr(
+        "quantbench.agent.coordinator._fetch_benchmark_returns",
+        lambda params, fallback: None,
+    )
+    candidates = [
+        {"name": f"f{i}", "code": f"def compute(df):\n    return df['close'].pct_change({i + 1}).fillna(0.0)\n"}
+        for i in range(4)
+    ]
+    script = [
+        ("tools", [("build_universe", {"universe_name": "sp500", "as_of_date": "2024-01-01", "limit": 6})]),
+        (
+            "tools",
+            [
+                (
+                    "screen_factors",
+                    {
+                        "candidates": candidates,
+                        "start": "2024-01-01",
+                        "end": "2024-04-05",
+                        "timeframe": "1d",
+                        "n_groups": 3,
+                        "cost_bps": 0,
+                    },
+                )
+            ],
+        ),
+        ("text", "screen done"),
+    ]
+
+    result = Coordinator(
+        run_store=ArtifactStore(tmp_path / "runs"),
+        llm=FakeLLMClient(script),
+        critic_llm=JsonCriticLLM(),
+    ).run("批量筛选四个截面因子")
+
+    summary = json.loads((result.run_dir / "factor_screen_summary.json").read_text(encoding="utf-8"))
+    assert summary["effective_trials"] >= 4
+    assert summary["pbo"]["n_configs"] == 4
+    assert "is_overfit" in summary["pbo"]
+    for item in summary["candidates"]:
+        assert item["dsr"]["n_trials"] == summary["effective_trials"]
+        child_review = json.loads((tmp_path / "runs" / item["run_id"] / "review_report.json").read_text(encoding="utf-8"))
+        assert any(finding["check"] == "deflated_sharpe" for finding in child_review["findings"])
+        assert any(finding["check"] == "pbo_batch" for finding in child_review["findings"])
 
 
 def test_screen_factors_isolates_single_candidate_failure(tmp_path: Path, monkeypatch):

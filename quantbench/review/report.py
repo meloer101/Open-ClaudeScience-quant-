@@ -7,12 +7,16 @@ import pandas as pd
 
 from quantbench.review.beta_exposure import compute_beta
 from quantbench.review.cost_sensitivity import CostSensitivityResult, run_cost_sensitivity_check
+from quantbench.review.deflated_sharpe import MIN_DSR_OBSERVATIONS, deflated_sharpe_ratio
 from quantbench.review.lookahead import LookaheadIssue, detect_lookahead
 from quantbench.review.out_of_sample import OOSResult, run_out_of_sample_check
+from quantbench.review.pbo import PBOResult
 from quantbench.review.parameter_stability import ParameterStabilityResult, run_parameter_stability_check
 from quantbench.review.regime import yearly_return_contribution
 from quantbench.review.symbol_concentration import symbol_concentration_from_factor_panel
 from quantbench.review.tail_dependence import MAX_BEST_DAYS, best_days_contribution_share
+from quantbench.review.walk_forward import WalkForwardResult, run_walk_forward
+from quantbench.engine.metrics import periods_per_year_from_timestamps
 
 
 SEVERITY_ORDER = ("critical", "warning", "info", "pass")
@@ -24,6 +28,7 @@ BETA_R2_WARNING = 0.5
 BETA_ABS_WARNING = 0.7
 MIN_OOS_OBSERVATIONS = 30
 MIN_BETA_OBSERVATIONS = 30
+MIN_WALK_FORWARD_WINDOWS = 3
 
 
 @dataclass(frozen=True)
@@ -95,12 +100,19 @@ def run_review(
     factor_panel: pd.DataFrame | None = None,
     n_groups: int | None = None,
     turnover_annual: float | None = None,
+    n_trials: int = 1,
+    trial_sharpes: list[float] | None = None,
+    pbo_result: PBOResult | None = None,
 ) -> ReviewReport:
     findings: list[ReviewFinding] = []
     findings.extend(_safe("lookahead", lambda: _lookahead_findings(code)))
     findings.extend(_safe("out_of_sample", lambda: [_oos_finding(run_out_of_sample_check(out_of_sample_data, run_on_data))]))
     findings.extend(_safe("cost_sensitivity", lambda: [_cost_finding(run_cost_sensitivity_check(cost_bps, rerun_at_cost))]))
     findings.extend(_safe("parameter_stability", lambda: [_parameter_finding(run_parameter_stability_check(code, rerun_with_code))]))
+    findings.extend(_safe("deflated_sharpe", lambda: [_dsr_finding(returns, n_trials, trial_sharpes)]))
+    findings.extend(_safe("walk_forward", lambda: [_walk_forward_finding(run_walk_forward(out_of_sample_data, run_on_data))]))
+    if pbo_result is not None:
+        findings.append(_pbo_finding(pbo_result))
     findings.extend(_safe("regime", lambda: [_regime_finding(returns)]))
     findings.extend(_safe("tail_dependence", lambda: [_tail_finding(returns)]))
     findings.append(_turnover_finding(turnover_annual))
@@ -179,6 +191,42 @@ def _parameter_finding(result: ParameterStabilityResult | None) -> ReviewFinding
     if result.sharpe_spread > PARAMETER_INSTABILITY_THRESHOLD:
         return ReviewFinding("parameter_stability", "warning", "Sharpe is sensitive to +/-20% numeric parameter perturbations.", detail)
     return ReviewFinding("parameter_stability", "pass", "Parameter perturbation did not breach the instability threshold.", detail)
+
+
+def _dsr_finding(returns: pd.Series, n_trials: int, trial_sharpes: list[float] | None) -> ReviewFinding:
+    periods = periods_per_year_from_timestamps(returns.index)
+    result = deflated_sharpe_ratio(returns, n_trials=n_trials, trial_sharpes=trial_sharpes, periods_per_year=periods)
+    detail = asdict(result)
+    if n_trials <= 1:
+        return ReviewFinding("deflated_sharpe", "info", "Single-trial run; multiple-testing deflation not applied.", detail)
+    if result.n_observations < MIN_DSR_OBSERVATIONS:
+        return ReviewFinding("deflated_sharpe", "info", "Not enough observations to evaluate deflated Sharpe ratio.", detail)
+    if not result.is_significant:
+        return ReviewFinding(
+            "deflated_sharpe",
+            "warning",
+            "Sharpe is not significant after multiple-testing deflation.",
+            detail,
+        )
+    return ReviewFinding("deflated_sharpe", "pass", "Sharpe remains significant after multiple-testing deflation.", detail)
+
+
+def _pbo_finding(result: PBOResult) -> ReviewFinding:
+    detail = asdict(result)
+    if result.n_configs < 4 or not result.logits:
+        return ReviewFinding("pbo_batch", "info", "Not enough candidate configurations to evaluate batch overfitting.", detail)
+    if result.is_overfit:
+        return ReviewFinding("pbo_batch", "warning", "Batch CSCV indicates elevated probability of backtest overfitting.", detail)
+    return ReviewFinding("pbo_batch", "pass", "Batch CSCV did not indicate elevated overfitting probability.", detail)
+
+
+def _walk_forward_finding(result: WalkForwardResult) -> ReviewFinding:
+    detail = asdict(result)
+    if result.n_windows < MIN_WALK_FORWARD_WINDOWS:
+        return ReviewFinding("walk_forward", "info", "Not enough walk-forward windows to evaluate OOS distribution.", detail)
+    if result.positive_window_share < 0.5:
+        return ReviewFinding("walk_forward", "warning", "Most walk-forward OOS windows have non-positive Sharpe.", detail)
+    return ReviewFinding("walk_forward", "pass", "Walk-forward OOS windows did not breach warning thresholds.", detail)
 
 
 def _regime_finding(returns: pd.Series) -> ReviewFinding:

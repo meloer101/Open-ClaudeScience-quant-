@@ -12,6 +12,7 @@ def build_research_note(
     review_markdown: str = "",
     critic_markdown: str = "",
     lineage_markdown: str = "",
+    metrics_ci: dict[str, dict[str, float]] | None = None,
 ) -> str:
     warnings = warnings or []
     warning_block = ""
@@ -25,7 +26,7 @@ def build_research_note(
 """
 
     if metrics:
-        metrics_rows = "\n".join(f"| {key} | {value} |" for key, value in metrics.items())
+        metrics_rows = _metrics_rows(metrics, metrics_ci)
         chart_block = "## 图表\n![equity curve](equity_curve.png)\n![drawdown](drawdown.png)\n"
     else:
         metrics_rows = "| (no backtest was run) | - |"
@@ -81,6 +82,7 @@ def build_cross_sectional_research_note(
     review_markdown: str = "",
     critic_markdown: str = "",
     lineage_markdown: str = "",
+    metrics_ci: dict[str, dict[str, float]] | None = None,
 ) -> str:
     warnings = warnings or []
     data_quality = data_quality or {}
@@ -94,7 +96,7 @@ def build_cross_sectional_research_note(
 ---
 """
 
-    metrics_rows = "\n".join(f"| {key} | {value} |" for key, value in metrics.items())
+    metrics_rows = _metrics_rows(metrics, metrics_ci)
     cache = config.get("cache") or {}
     universe = config.get("universe") or {}
     quality_rows = "\n".join(
@@ -167,6 +169,7 @@ def build_portfolio_research_note(
     summary: str = "",
     review_markdown: str = "",
     critic_markdown: str = "",
+    metrics_ci: dict[str, dict[str, float]] | None = None,
 ) -> str:
     """`outcome` is a quantbench.portfolio.pipeline.PortfolioOptimizationOutcome.
     Typed as Any here (rather than importing the dataclass) to avoid
@@ -185,7 +188,7 @@ def build_portfolio_research_note(
 """
 
     metrics = outcome.combined.metrics
-    metrics_rows = "\n".join(f"| {key} | {value} |" for key, value in metrics.items())
+    metrics_rows = _metrics_rows(metrics, metrics_ci)
     weight_rows = "\n".join(f"| {run_id_} | {weight:.4f} |" for run_id_, weight in outcome.weights.items())
 
     comparison_rows = "\n".join(
@@ -256,3 +259,15 @@ def build_portfolio_research_note(
 ## 代码
 组合权重见 `portfolio_weights.json`；完整方法对照与诊断见 `portfolio_summary.json`；组合收益序列见 `backtest_result.json`。
 """
+
+
+def _metrics_rows(metrics: dict[str, float], metrics_ci: dict[str, dict[str, float]] | None = None) -> str:
+    rows = []
+    intervals = metrics_ci or {}
+    for key, value in metrics.items():
+        interval = intervals.get(key)
+        if key in {"sharpe", "annual_return"} and interval:
+            rows.append(f"| {key} | {value} [95% CI: {interval['lower']}, {interval['upper']}] |")
+        else:
+            rows.append(f"| {key} | {value} |")
+    return "\n".join(rows)

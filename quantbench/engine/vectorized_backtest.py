@@ -3,6 +3,7 @@ from typing import Any
 
 import pandas as pd
 
+from quantbench.review.bootstrap import metrics_ci
 from quantbench.engine.metrics import (
     annualized_return,
     annualized_sharpe,
@@ -24,6 +25,7 @@ class BacktestResult:
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "metrics": self.metrics,
+            "metrics_ci": metrics_ci(self.returns),
             "series": {
                 "timestamp": [str(item) for item in self.returns.index],
                 "returns": self.returns.fillna(0).round(10).tolist(),

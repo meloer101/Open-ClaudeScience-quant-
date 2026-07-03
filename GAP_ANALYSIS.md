@@ -101,10 +101,10 @@
 
 **缺什么**：
 - [ ] **试验次数记账**：实验库记录"针对同一 universe × 时段，历史上总共试过多少个因子/参数组合"。这是所有修正方法的输入，且只有平台能自动做到（人工研究者自己都记不住）。
-- [ ] **Deflated Sharpe Ratio（DSR）**：给定试验次数 N 和候选 Sharpe 的方差，修正后的 Sharpe 显著性。作为 `screen_factors` 流水线的**强制输出列**。
-- [ ] **PBO（Probability of Backtest Overfitting）**：基于 CSCV（组合对称交叉验证）估计"样本内最优的配置在样本外表现低于中位数"的概率。
-- [ ] Reviewer verdict 规则接入：DSR 不显著或 PBO 过高时，封顶 verdict（不给 STRONG）。
-- [ ] 遵循 VISION 第十一节准则：DSR/PBO 的计算逻辑属于"必须绝对正确的基础设施"——**写成有测试的代码**，Critic/Coordinator 只解读结果。
+- [x] **Deflated Sharpe Ratio（DSR）**：给定试验次数 N 和候选 Sharpe 的方差，修正后的 Sharpe 显著性。作为 `screen_factors` 流水线的**强制输出列**。
+- [x] **PBO（Probability of Backtest Overfitting）**：基于 CSCV（组合对称交叉验证）估计"样本内最优的配置在样本外表现低于中位数"的概率。
+- [x] Reviewer verdict 规则接入：DSR 不显著或 PBO 过高时，封顶 verdict（不给 STRONG）。
+- [x] 遵循 VISION 第十一节准则：DSR/PBO 的计算逻辑属于"必须绝对正确的基础设施"——**写成有测试的代码**，Critic/Coordinator 只解读结果。
 
 ### 2.2 Walk-forward / CPCV（优先级：🟡 中高）
 
@@ -120,7 +120,7 @@
 **现状**：research note 报告 Sharpe 1.42 单点值，无区间——对研究者是误导。
 
 **缺什么**：
-- [ ] Bootstrap（block bootstrap，尊重收益自相关）计算 Sharpe / 年化收益的置信区间。
+- [x] Bootstrap（block bootstrap，尊重收益自相关）计算 Sharpe / 年化收益的置信区间。
 - [ ] IC 的 t 统计量 / Newey-West 修正标准误。
 - [ ] Research note 模板改为报告"Sharpe 1.42 [95% CI: 0.6, 2.1]"格式；ChartsPanel 相应展示区间。
 
