@@ -10,8 +10,7 @@ export interface HeatmapGridProps {
  * A plain diverging-color grid, not a specific "IC heatmap" - QuantBench does
  * not persist per-symbol IC, so this renders whatever grid data it's given
  * (e.g. decile-return-by-month) rather than pretending to be the symbol-level
- * heatmap VISION.md's chart list describes. See PHASE4.md section 4 for why
- * that one is explicitly out of scope for v1.
+ * heatmap VISION.md's chart list describes.
  */
 export function HeatmapGrid({ rowLabels, columnLabels, values, formatValue = (v) => v.toFixed(3) }: HeatmapGridProps) {
   const flat = values.flat().filter((v): v is number => v !== null);

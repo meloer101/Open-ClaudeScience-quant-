@@ -3,10 +3,10 @@ import builtins
 import numpy as np
 import pandas as pd
 
-# Phase 0 sandboxing: block the builtins that would let generated signal code
+# Basic signal-code sandboxing: block the builtins that would let generated signal code
 # reach outside pandas/numpy (filesystem, imports, nested eval). This is not a
-# process-level sandbox (that's a later hardening step) - it's the "basic
-# import whitelist" called for in PHASE0.md.
+# process-level sandbox (that's a later hardening step); it is only an import
+# whitelist and builtin denylist for local research code.
 _BLOCKED_BUILTINS = {"eval", "exec", "open", "__import__", "compile", "input", "exit", "quit", "breakpoint"}
 _SAFE_BUILTINS = {name: getattr(builtins, name) for name in dir(builtins) if name not in _BLOCKED_BUILTINS}
 

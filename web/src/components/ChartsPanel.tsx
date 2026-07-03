@@ -138,7 +138,7 @@ export function ChartsPanel({ runId }: ChartsPanelProps) {
       {isCrossSectional && heatmap && heatmap.columnLabels.length > 0 && (
         <Section
           title="Decile Return Heatmap"
-          subtitle="Monthly average return by group - not a per-symbol IC heatmap (QuantBench doesn't persist per-symbol IC yet, see PHASE4.md)"
+          subtitle="Monthly average return by group - not a per-symbol IC heatmap (QuantBench doesn't persist per-symbol IC yet)"
         >
           <HeatmapGrid rowLabels={heatmap.rowLabels} columnLabels={heatmap.columnLabels} values={heatmap.values} formatValue={pct} />
         </Section>

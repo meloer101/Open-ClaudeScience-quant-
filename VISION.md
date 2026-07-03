@@ -338,8 +338,8 @@ class UniverseDefinition:
 
 当前实现把“可复用沉淀”拆成两套独立机制，避免把具体因子代码误做成固定 tool：
 
-- **Factor Library（已实现，详见 [PHASE6.md](PHASE6.md)）**：`factor save/list/show/use` 会把已跑通且经 Reviewer 审查的 `compute(df)` 因子代码保存为本地 JSON 档案，连同参数、source verdict、指标和 Reviewer findings 一起快照。默认拒绝收藏 `REJECTED` run，`--force` 可覆盖但会保留 `saved_from_rejected` 标记。`factor use` 会把因子代码作为可修改起点注入正常 Coordinator 流程，并在 config 中记录 `derived_from_factor`。
-- **Workflow Skills（已实现，详见 [PHASE7.md](PHASE7.md)）**：`skills_docs/*.md` 存放带 `name`/`description`/`triggers` frontmatter 的工作流规范，启动 run 时按触发词匹配并追加到 system prompt，也支持 `--skill <name>` 显式注入。每次 run 的 manifest 记录 `injected_skills`，保证影响模型行为的上下文可审计。
+- **Factor Library（已实现）**：`factor save/list/show/use` 会把已跑通且经 Reviewer 审查的 `compute(df)` 因子代码保存为本地 JSON 档案，连同参数、source verdict、指标和 Reviewer findings 一起快照。默认拒绝收藏 `REJECTED` run，`--force` 可覆盖但会保留 `saved_from_rejected` 标记。`factor use` 会把因子代码作为可修改起点注入正常 Coordinator 流程，并在 config 中记录 `derived_from_factor`。
+- **Workflow Skills（已实现）**：`skills_docs/*.md` 存放带 `name`/`description`/`triggers` frontmatter 的工作流规范，启动 run 时按触发词匹配并追加到 system prompt，也支持 `--skill <name>` 显式注入。每次 run 的 manifest 记录 `injected_skills`，保证影响模型行为的上下文可审计。
 
 这两者都不是新增可调用函数：因子库保存的是可复制修改的代码档案；Workflow Skills 保存的是“怎么做这类研究”的指导文档。
 
@@ -347,9 +347,9 @@ class UniverseDefinition:
 
 ## 七、迭代计划
 
-> **执行顺序调整（Phase 1 完成后）：** 原计划 Phase 2（Reviewer Agent）顺延，Phase UI（原 Phase 4 可视化与 UI 的核心部分）提前执行，详见 [PHASE_UI.md](PHASE_UI.md)。理由：Phase 0/1 产出的 artifact 已经过多轮 bug 修复、有警告护栏，值得先让它们在真正的 Web 工作台里被看见，而不是继续堆在终端和文件夹里；这个调整不影响"先正确性、后体验"的整体原则——Reviewer Agent 仍是下一个要做的审查能力。
+> **执行顺序调整（Phase 1 完成后）：** 原计划 Phase 2（Reviewer Agent）顺延，Phase UI（原 Phase 4 可视化与 UI 的核心部分）提前执行。理由：Phase 0/1 产出的 artifact 已经过多轮 bug 修复、有警告护栏，值得先让它们在真正的 Web 工作台里被看见，而不是继续堆在终端和文件夹里；这个调整不影响"先正确性、后体验"的整体原则——Reviewer Agent 仍是下一个要做的审查能力。
 >
-> **Phase 2 完成（详细计划见 [PHASE2.md](PHASE2.md)）：** Reviewer 现在挂在 Coordinator 的 backtest 成功路径上自动运行，不是模型可选调用的工具，输出确定性、可测试的 verdict（STRONG/PROMISING/WEAK/REJECTED）。落地后用真实美股数据（而不只是合成 fixture）做了一轮校准，改掉了两处会让 Reviewer 结论不可信的问题：样本外符号翻转检查在训练期 Sharpe 偏低时会漏判；极端交易依赖检查原先用"剔除最赚钱的 5% 交易日后复利重算净值"，在多年期日频序列上无论策略好坏都会衰减到接近 -100%（纯数学的复利假象，不是真实信号），已改为不复利的"贡献占比"口径。
+> **Phase 2 完成：** Reviewer 现在挂在 Coordinator 的 backtest 成功路径上自动运行，不是模型可选调用的工具，输出确定性、可测试的 verdict（STRONG/PROMISING/WEAK/REJECTED）。落地后用真实美股数据（而不只是合成 fixture）做了一轮校准，改掉了两处会让 Reviewer 结论不可信的问题：样本外符号翻转检查在训练期 Sharpe 偏低时会漏判；极端交易依赖检查原先用"剔除最赚钱的 5% 交易日后复利重算净值"，在多年期日频序列上无论策略好坏都会衰减到接近 -100%（纯数学的复利假象，不是真实信号），已改为不复利的"贡献占比"口径。
 
 ### Phase 0: 骨架 (Week 1)
 **目标：一个能跑通的最小闭环**
@@ -411,27 +411,27 @@ class UniverseDefinition:
 - [x] 实验库可视化（表格 + 筛选 + 对比）
 - [x] 交互式图表（hover 显示数值、点击 fork 联动谱系）
 
-**当前状态（详细计划见 [PHASE4.md](PHASE4.md)）：** ChartsPanel 消费 `backtest_result.json`/`review_report.json` 两个已有的确定性 JSON artifact，渲染成一套零依赖手写 SVG 图表（不引入图表库），前端不做任何统计计算。按 run 有什么数据就渲染什么区块，没有的维度（比如单标的场景的 decile/symbol concentration）直接省略而不是画空图。Compare 视图新增 Returns Correlation 矩阵（`library/compare.py` 新增 `compute_returns_correlation`，对齐时间戳、样本不足显式返回 null）。落地过程中发现并修复了一个历史遗留 bug：截面回测结果曾经存成 `cross_sectional_backtest_result.json`，和单标的路径的 `backtest_result.json` 不一致，导致新图表和相关性计算对截面 run 完全读不到数据——已统一成单一文件名，并加了回归测试锁定。
+**当前状态：** ChartsPanel 消费 `backtest_result.json`/`review_report.json` 两个已有的确定性 JSON artifact，渲染成一套零依赖手写 SVG 图表（不引入图表库），前端不做任何统计计算。按 run 有什么数据就渲染什么区块，没有的维度（比如单标的场景的 decile/symbol concentration）直接省略而不是画空图。Compare 视图新增 Returns Correlation 矩阵（`library/compare.py` 新增 `compute_returns_correlation`，对齐时间戳、样本不足显式返回 null）。落地过程中发现并修复了一个历史遗留 bug：截面回测结果曾经存成 `cross_sectional_backtest_result.json`，和单标的路径的 `backtest_result.json` 不一致，导致新图表和相关性计算对截面 run 完全读不到数据——已统一成单一文件名，并加了回归测试锁定。
 
-**明确保留的缺口（详见 PHASE4.md 第四节，不是遗忘）：** 真正的按标的展开的 Factor IC Heatmap（QuantBench 未持久化逐标的 IC，v1 用 decile-by-time 热力图诚实替代）；多因子 Risk Attribution（没有因子模型数据源，只有单一 benchmark 的 beta exposure）。两者留给 Phase 5 多资产工作把数据源建起来后再做。
+**明确保留的缺口：** 真正的按标的展开的 Factor IC Heatmap（QuantBench 未持久化逐标的 IC，v1 用 decile-by-time 热力图诚实替代）；多因子 Risk Attribution（没有因子模型数据源，只有单一 benchmark 的 beta exposure）。两者留给后续数据源工作补齐。
 
 **验收标准：** 完整的 Web 体验，用户不需要看终端。
 
 ### Phase 5: 多资产与高级功能 (Week 11-14)
 **目标：扩展到更多市场和更复杂的研究**
 
-- [x] 多 agent 协作（独立 Critic Agent + 批量因子筛选流水线，详见 [PHASE8.md](PHASE8.md)——"研究 agent + 审查 agent 并行"字面意思在确定性 Reviewer 架构下不成立，重新定义为独立 LLM 复核 + 跨候选因子并发）
+- [x] 多 agent 协作（独立 Critic Agent + 批量因子筛选流水线；"研究 agent + 审查 agent 并行"字面意思在确定性 Reviewer 架构下不成立，重新定义为独立 LLM 复核 + 跨候选因子并发）
 - [x] 自定义沉淀系统：Factor Library + Workflow Skills（两套独立机制）
-- [x] 组合优化（详见 [PHASE9.md](PHASE9.md)——默认走风险平价/HRP 等不估计期望收益的稳健方法，max_sharpe 仅作警示性对照；训练集拟合权重、样本外诚实汇报衰减；组合本身是一等公民 run，过一遍组合专属 Reviewer + 独立 Critic）
+- [x] 组合优化（默认走风险平价/HRP 等不估计期望收益的稳健方法，max_sharpe 仅作警示性对照；训练集拟合权重、样本外诚实汇报衰减；组合本身是一等公民 run，过一遍组合专属 Reviewer + 独立 Critic）
 - [x] 多资产支持（crypto 截面补全：当前成交量 Top-N USDT 永续合约 universe、BTC/USDT benchmark 路由、funding rate 未建模警告）
-- [ ] 期货支持（推迟：需要连续合约/展期规则，详见 [PHASE5.md](PHASE5.md) 第一节和第五节）
+- [ ] 期货支持（推迟：需要连续合约/展期规则）
 - [ ] Paper trading 集成
 - [ ] 远程计算支持（SSH / Modal）
 
-**当前状态（详细计划见 [PHASE5.md](PHASE5.md)、[PHASE8.md](PHASE8.md)、[PHASE9.md](PHASE9.md)）：** Phase 5 先只补齐 crypto 截面研究，而不是一次性吞下期货、多 agent、组合优化等所有高级能力，现已逐步补齐前两项。系统现在可以构建当前按 24h 成交量排名的 Top-N USDT 永续合约 universe，明确标注这不是 point-in-time universe；截面 Reviewer 的 beta exposure 会按资产类别路由，crypto 使用 BTC/USDT，equity 仍使用 SPY；crypto 永续合约 run 会自动写入 funding rate carry cost 未建模的警告。期货支持没有打勾，后续需要先单独设计 continuous contract 和 roll 规则。多 agent 协作已按 PHASE8.md 落地：每次 run 结束时新增一个独立 LLM Critic 调用，只看确定性证据（Reviewer 结果+回测指标+ Coordinator 最终陈述），核对叙述一致性并给出独立 verdict；`screen_factors` 工具让一次请求并发筛选多个候选因子，每个候选各自触发 Critic。组合优化已按 PHASE9.md 落地：`optimize_portfolio` 工具把一批已有 run 的收益序列组合成一个多因子组合，默认方法是风险平价（不估计期望收益，只用协方差），六种方法（含 max_sharpe 警示性对照）的样本内/样本外 Sharpe 对照表强制随结果一起返回；组合本身建一个新 run，跑组合专属确定性 Reviewer（样本外衰减、权重扰动稳定性、是否真的比最好的单因子更好、成分相关性健康度）和独立 Critic，自动继承实验库/lineage/compare 全部溯源能力。
+**当前状态：** Phase 5 先只补齐 crypto 截面研究，而不是一次性吞下期货、多 agent、组合优化等所有高级能力，现已逐步补齐前两项。系统现在可以构建当前按 24h 成交量排名的 Top-N USDT 永续合约 universe，明确标注这不是 point-in-time universe；截面 Reviewer 的 beta exposure 会按资产类别路由，crypto 使用 BTC/USDT，equity 仍使用 SPY；crypto 永续合约 run 会自动写入 funding rate carry cost 未建模的警告。期货支持没有打勾，后续需要先单独设计 continuous contract 和 roll 规则。多 agent 协作已落地：每次 run 结束时新增一个独立 LLM Critic 调用，只看确定性证据（Reviewer 结果+回测指标+ Coordinator 最终陈述），核对叙述一致性并给出独立 verdict；`screen_factors` 工具让一次请求并发筛选多个候选因子，每个候选各自触发 Critic。组合优化已落地：`optimize_portfolio` 工具把一批已有 run 的收益序列组合成一个多因子组合，默认方法是风险平价（不估计期望收益，只用协方差），六种方法（含 max_sharpe 警示性对照）的样本内/样本外 Sharpe 对照表强制随结果一起返回；组合本身建一个新 run，跑组合专属确定性 Reviewer（样本外衰减、权重扰动稳定性、是否真的比最好的单因子更好、成分相关性健康度）和独立 Critic，自动继承实验库/lineage/compare 全部溯源能力。
 
 ### Phase 6: 生产化 (Week 15+)
-- [x] Live signal monitoring（详细计划见 [PHASE10.md](PHASE10.md)）
+- [x] Live signal monitoring
 - [x] 策略衰减预警（同上）
 - [ ] 团队协作（明确不做，见第八节产品边界：先做单用户本地工具）
 - [ ] 权限管理（同上，依赖团队协作，暂不做）

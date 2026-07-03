@@ -170,8 +170,7 @@ def test_coordinator_runs_full_tool_loop_with_fake_llm(tmp_path, monkeypatch):
 
 
 def test_signal_py_is_independently_reproducible(tmp_path, monkeypatch):
-    """Regression test for the PHASE0.md acceptance criterion: pull signal.py out
-    of a run directory and it must run standalone and reproduce the same values."""
+    """A saved signal.py must run standalone and reproduce the same values."""
     import subprocess
     import sys
 

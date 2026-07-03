@@ -155,7 +155,7 @@ Web UI 默认连接本地 FastAPI 服务。
 ### 产品方向
 
 - 扩展 experiment library 的标签治理和批量操作。
-- 按标的展开的 Factor IC Heatmap 和多因子 Risk Attribution（需要先有逐标的 IC 持久化和因子模型数据源，v1 用 decile-by-time 热力图和单一 benchmark beta 暂代，详见 [PHASE4.md](PHASE4.md) 第四节）。
+- 按标的展开的 Factor IC Heatmap 和多因子 Risk Attribution（需要先有逐标的 IC 持久化和因子模型数据源，v1 用 decile-by-time 热力图和单一 benchmark beta 暂代）。
 - 支持多 session 研究工作流，方便比较策略分支和研究路径。
 
 ## 风险声明

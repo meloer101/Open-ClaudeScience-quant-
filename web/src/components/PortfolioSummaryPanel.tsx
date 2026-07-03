@@ -16,8 +16,8 @@ function fmtPct(value: number | null | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-// Out-of-sample decay is the whole point of showing this table (see PHASE9.md
-// section 1/5): a method whose test Sharpe is far below its train Sharpe is
+// Out-of-sample decay is the whole point of showing this table: a method whose
+// test Sharpe is far below its train Sharpe is
 // flagged even if it happens to have the best train Sharpe of the bunch -
 // that pattern (typically max_sharpe) is the expected signature of
 // overfitting to noisy expected-return estimates, not something to hide.

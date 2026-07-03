@@ -7,8 +7,8 @@ export interface StatCardProps {
 /**
  * A single scalar stat (e.g. beta exposure), deliberately not a chart.
  * VISION.md's "Risk Attribution" entry implies a multi-factor breakdown
- * QuantBench has no data source for yet (see PHASE4.md section 4) - rendering
- * the one real number (beta vs. a single benchmark) as a plain stat avoids
+ * QuantBench has no data source for yet; rendering the one real number
+ * (beta vs. a single benchmark) as a plain stat avoids
  * dressing it up as something more precise than it is.
  */
 export function StatCard({ label, value, sublabel }: StatCardProps) {

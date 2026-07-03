@@ -22,7 +22,7 @@ from quantbench.skills.codeexec import load_signal_function, run_signal_code
 ALIVE_VERDICTS = {"STRONG", "PROMISING"}
 
 # config.yaml does not persist the exact timeframe/n_groups/cost_bps a
-# cross-sectional or portfolio run used (see PHASE6.md limitations section).
+# cross-sectional or portfolio run used.
 # Re-running for a decay check therefore approximates them from the run's
 # recorded asset_class and the same coordinator.py tool defaults every new
 # run already uses, rather than the run's own original values. This is a
@@ -189,8 +189,8 @@ def _record_report(run_id: str, report: DecayReport) -> None:
 
 def check_run_decay(run_id: str, conn: duckdb.DuckDBPyConnection | None = None) -> dict[str, Any]:
     """Deterministic, no-LLM decay check for one run. Writes to the run's own
-    monitoring_report.json/manifest.json rather than creating a new run - see
-    PHASE6.md for why (repeated health checks are not new research findings).
+    monitoring_report.json/manifest.json rather than creating a new run because
+    repeated health checks are not new research findings.
     """
     own_conn = conn is None
     conn = conn or get_connection()

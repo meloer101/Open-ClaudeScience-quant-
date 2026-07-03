@@ -13,8 +13,8 @@ export function findingByCheck(findings: ReviewFindingPayload[], check: string):
 /**
  * Buckets a decile/group return series into monthly averages per group, for
  * the HeatmapGrid in ChartsPanel. This is an honest substitute for VISION's
- * per-symbol "Factor IC Heatmap" (see PHASE4.md section 4) - QuantBench has
- * no persisted per-symbol IC to draw from, but it does have per-period decile
+ * per-symbol "Factor IC Heatmap" - QuantBench has no persisted per-symbol IC
+ * to draw from, but it does have per-period decile
  * returns (group_returns), so this reshapes *that* into a readable
  * time-x-group grid instead of pretending to be the symbol-level chart.
  */

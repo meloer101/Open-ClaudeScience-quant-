@@ -9,8 +9,8 @@ from scipy.cluster.hierarchy import linkage
 from scipy.optimize import minimize
 from scipy.spatial.distance import squareform
 
-# Ordered roughly least -> most willing to estimate expected returns (see
-# PHASE9.md section 1): equal_weight/inverse_variance/min_variance/risk_parity/hrp
+# Ordered roughly least -> most willing to estimate expected returns:
+# equal_weight/inverse_variance/min_variance/risk_parity/hrp
 # never touch the sample mean at all; only max_sharpe does, which is exactly why
 # it is the one method this project treats as a cautionary comparison rather
 # than the default (Michaud 1989 calls mean-variance optimization an "error
