@@ -56,6 +56,7 @@ class UniverseDefinition:
     asset_class: str = "equity"
     membership_intervals: dict[str, list[list[str]]] | None = None
     covers_delisted: bool = False
+    metadata: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -108,6 +109,14 @@ def build_sp500_universe(
             raise ValueError("limit must be at least 1")
         symbols = symbols[:limit]
         note = f"{SURVIVORSHIP_BIAS_NOTE} {LIMITED_SAMPLE_NOTE_TEMPLATE.format(limit=limit)}"
+    sector_by_symbol: dict[str, str] = {}
+    if "GICS Sector" in constituents.columns:
+        sector_rows = constituents.loc[:, ["Symbol", "GICS Sector"]].dropna()
+        sector_by_symbol = {
+            str(row["Symbol"]): str(row["GICS Sector"])
+            for _, row in sector_rows.iterrows()
+            if str(row["Symbol"]) in symbols
+        }
 
     return UniverseDefinition(
         name="sp500",
@@ -118,6 +127,7 @@ def build_sp500_universe(
         source=WIKIPEDIA_SP500_URL,
         sample_limit=limit,
         asset_class="equity",
+        metadata={"gics_sector": sector_by_symbol},
     )
 
 

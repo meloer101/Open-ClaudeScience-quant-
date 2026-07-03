@@ -34,6 +34,9 @@ MIN_WALK_FORWARD_WINDOWS = 3
 MIN_CPCV_PATHS = 3
 UNIVERSE_COVERAGE_MISSING_WARNING = 0.10
 UNIVERSE_COVERAGE_MISSING_CRITICAL = 0.40
+CAPACITY_WARNING_AUM = 1_000_000
+SHORT_SHARE_WARNING = 0.70
+EXECUTION_SHARPE_DECAY_WARNING = 0.50
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,10 @@ def run_review(
     pbo_result: PBOResult | None = None,
     universe_coverage: dict[str, Any] | None = None,
     funding_cost_sensitivity: dict[str, Any] | None = None,
+    execution_sensitivity: dict[str, Any] | None = None,
+    capacity_curve: list[dict[str, Any]] | None = None,
+    long_short_contribution: dict[str, Any] | None = None,
+    borrow_cost_sensitivity: dict[str, Any] | None = None,
     ic_series: pd.Series | None = None,
     ic_significance: ICSignificance | dict[str, Any] | None = None,
 ) -> ReviewReport:
@@ -134,6 +141,14 @@ def run_review(
         findings.append(_universe_coverage_finding(universe_coverage))
     if funding_cost_sensitivity is not None:
         findings.append(_funding_cost_finding(funding_cost_sensitivity))
+    if execution_sensitivity is not None:
+        findings.append(_execution_sensitivity_finding(execution_sensitivity))
+    if capacity_curve is not None:
+        findings.append(_capacity_finding(capacity_curve))
+    if long_short_contribution is not None:
+        findings.append(_short_dependency_finding(long_short_contribution))
+    if borrow_cost_sensitivity is not None:
+        findings.append(_borrow_cost_finding(borrow_cost_sensitivity))
     verdict, reason = determine_verdict(findings)
     return ReviewReport(findings=findings, verdict=verdict, verdict_reason=reason)
 
@@ -259,6 +274,59 @@ def _funding_cost_finding(detail: dict[str, Any]) -> ReviewFinding:
         f"(decay {decay:.3f})."
     )
     return ReviewFinding("funding_cost_sensitivity", severity, message, detail)
+
+
+def _execution_sensitivity_finding(detail: dict[str, Any]) -> ReviewFinding:
+    close_sharpe = detail.get("close_t_sharpe")
+    open_next_sharpe = detail.get("open_t+1_sharpe")
+    if close_sharpe is None or open_next_sharpe is None:
+        return ReviewFinding("execution_sensitivity", "info", "Execution sensitivity could not be evaluated.", detail)
+    decay = float(close_sharpe) - float(open_next_sharpe)
+    severity = "warning" if decay > EXECUTION_SHARPE_DECAY_WARNING else "pass"
+    message = (
+        f"Sharpe changed from {float(close_sharpe):.3f} using close_t fills to "
+        f"{float(open_next_sharpe):.3f} using open_t+1 fills (decay {decay:.3f})."
+    )
+    return ReviewFinding("execution_sensitivity", severity, message, detail)
+
+
+def _capacity_finding(curve: list[dict[str, Any]]) -> ReviewFinding:
+    detail = {"capacity_curve": curve}
+    if not curve:
+        return ReviewFinding("capacity", "info", "Liquidity capacity was not estimated for this run.", detail)
+    base = float(curve[0].get("sharpe", 0.0) or 0.0)
+    if base <= 0:
+        return ReviewFinding("capacity", "info", "Capacity threshold skipped because base Sharpe is non-positive.", detail)
+    threshold = base * 0.5
+    estimated = None
+    for row in curve:
+        if float(row.get("sharpe", 0.0) or 0.0) < threshold:
+            estimated = float(row.get("aum_usd", 0.0) or 0.0)
+            break
+    detail["estimated_capacity_usd"] = estimated
+    if estimated is not None and estimated < CAPACITY_WARNING_AUM:
+        return ReviewFinding("capacity", "warning", f"Estimated deployable capacity is below ${CAPACITY_WARNING_AUM:,.0f}.", detail)
+    return ReviewFinding("capacity", "pass", "Liquidity capacity did not breach warning thresholds.", detail)
+
+
+def _short_dependency_finding(detail: dict[str, Any]) -> ReviewFinding:
+    share = float(detail.get("short_share", 0.0) or 0.0)
+    if share <= 0:
+        return ReviewFinding("short_dependency", "info", "No material short-leg contribution detected.", detail)
+    if share > SHORT_SHARE_WARNING:
+        return ReviewFinding("short_dependency", "warning", "Returns depend heavily on the short leg; implementation may be borrow-constrained.", detail)
+    return ReviewFinding("short_dependency", "pass", "Short-leg contribution is below the dependency warning threshold.", detail)
+
+
+def _borrow_cost_finding(detail: dict[str, Any]) -> ReviewFinding:
+    before = detail.get("sharpe_before_borrow")
+    after = detail.get("sharpe_after_borrow")
+    if before is None or after is None:
+        return ReviewFinding("borrow_cost_sensitivity", "info", "Borrow cost sensitivity could not be evaluated.", detail)
+    decay = float(before) - float(after)
+    severity = "warning" if decay > 0.5 else "pass"
+    message = f"Borrow-adjusted Sharpe changed from {float(before):.3f} to {float(after):.3f} (decay {decay:.3f})."
+    return ReviewFinding("borrow_cost_sensitivity", severity, message, detail)
 
 
 def _oos_finding(result: OOSResult) -> ReviewFinding:

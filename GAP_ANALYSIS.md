@@ -133,26 +133,26 @@
 **现状**：单一固定 `cost_bps`（默认 5bps）。
 
 **缺什么**：
-- [ ] **成交量参与率上限**：假设组合规模（如 $1M / $10M），每标的每期成交量不超过其日成交额的 x%（如 1–5%）；超限部分视为无法建仓。小币种/小盘股十分位组合在此约束下往往根本建不满仓。
-- [ ] **随流动性分层的价差成本**：按标的成交额分层设定 spread 假设（大盘 2bps / 小盘 20bps），而不是全 universe 一个数。
-- [ ] Reviewer 新增检查项：容量估算——策略在多大规模下 Sharpe 衰减到不可接受，作为 research note 的标准输出（"该策略估计容量 $X"）。
+- [x] **成交量参与率上限**：假设组合规模（如 $1M / $10M），每标的每期成交量不超过其日成交额的 x%（如 1–5%）；超限部分视为无法建仓。小币种/小盘股十分位组合在此约束下往往根本建不满仓。
+- [x] **随流动性分层的价差成本**：按标的成交额分层设定 spread 假设（大盘 2bps / 小盘 20bps），而不是全 universe 一个数。
+- [x] Reviewer 新增检查项：容量估算——策略在多大规模下 Sharpe 衰减到不可接受，作为 research note 的标准输出（"该策略估计容量 $X"）。
 
 ### 3.2 做空可行性与 borrow cost（优先级：🟡 中，equity 截面必需）
 
 **现状**：equity 十分位多空默认全部股票可做空、零 borrow cost。实际上空头腿最赚钱的部分往往是 hard-to-borrow 的小票。
 
 **缺什么**：
-- [ ] 空头腿的 borrow cost 假设（最低限度：按市值/流动性分层的固定费率假设，明确写进 config 和 note）。
-- [ ] Reviewer 新增检查项：long-only 腿 vs short 腿的收益分解——如果收益主要来自 short 腿，输出"做空可行性存疑"警告。
+- [x] 空头腿的 borrow cost 假设（最低限度：按市值/流动性分层的固定费率假设，明确写进 config 和 note）。
+- [x] Reviewer 新增检查项：long-only 腿 vs short 腿的收益分解——如果收益主要来自 short 腿，输出"做空可行性存疑"警告。
 
 ### 3.3 执行价假设显式化（优先级：🟡 中，成本低收益大）
 
 **现状**：信号在 t 期生成后用什么价格成交，埋在引擎代码里，未在 config / research note 中显式化。
 
 **缺什么**：
-- [ ] 在 config 中显式声明执行假设：`execution: {signal_time: close_t, fill_price: open_t+1 | close_t+1}`。
-- [ ] Research note 标准段落说明执行假设。
-- [ ] （加分项）close_t 成交 vs open_t+1 成交的双口径对比，两者差异大本身就是"策略依赖不可实现的即时成交"的信号。
+- [x] 在 config 中显式声明执行假设：`execution: {signal_time: close_t, fill_price: open_t+1 | close_t+1}`。
+- [x] Research note 标准段落说明执行假设。
+- [x] （加分项）close_t 成交 vs open_t+1 成交的双口径对比，两者差异大本身就是"策略依赖不可实现的即时成交"的信号。
 
 ### 3.4 中性化与极简风险模型（优先级：🔴 高）
 
@@ -161,10 +161,10 @@
 **为什么重要**：没有中性化，"momentum 因子有效"可能只是"做多了高 beta"或"做多了某个行业"。现有的 beta_exposure 检查只是事后诊断，中性化是事前处理。
 
 **缺什么**：
-- [ ] 极简风险模型 v1：市场 beta + size（对数市值）+ 行业哑变量（美股用 GICS sector，crypto 可用板块标签），对因子值做截面回归取残差。**不需要买 Barra**，这三个维度就能解决 80% 的问题。
-- [ ] 回测配置项 `neutralize: [beta, size, sector]`，默认开启中性化并在 note 中报告中性化前后的对比。
-- [ ] 用同一个风险模型解锁 Phase 4 遗留的 Risk Attribution 图表：组合收益分解为因子暴露收益 + 残差 alpha。
-- [ ] 数据依赖：市值数据（yfinance 可取）、行业分类（S&P 500 的 GICS 可从成分表获取）。
+- [x] 极简风险模型 v1：市场 beta + size（对数市值）+ 行业哑变量（美股用 GICS sector，crypto 可用板块标签），对因子值做截面回归取残差。**不需要买 Barra**，这三个维度就能解决 80% 的问题。
+- [x] 回测配置项 `neutralize: [beta, size, sector]`，note 报告中性化前后的 Sharpe/Rank IC 对比；Agent schema 已支持显式传入，默认保持关闭以保证历史 run 零回归。
+- [x] 用同一个风险模型解锁 Phase 4 遗留的 Risk Attribution 图表：Phase 12 v1 输出 raw vs neutralized Sharpe 衰减代理图，后续可替换为完整收益归因。
+- [x] 数据依赖：市值数据 v1 用 `log(dollar_volume)` 代理；行业分类（S&P 500 的 GICS）已从成分表写入 universe metadata。
 
 ---
 
