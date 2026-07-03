@@ -38,6 +38,14 @@ MONITOR_SHARPE_ALERT_RATIO = 0.5
 MONITOR_SHARPE_WATCH_RATIO = 0.8
 MONITOR_POLL_INTERVAL_SECONDS = 6 * 3600
 
+# Signal-code execution sandbox (GAP 4.5 / PHASE13 1.1): conservative defaults for
+# a research-scale single-asset backtest call, not a batch job. Callers that need
+# more headroom pass an explicit SandboxConfig rather than raising these globally.
+SANDBOX_CPU_SECONDS = 10
+SANDBOX_MEM_MB = 1024
+SANDBOX_WALL_TIMEOUT_S = 20.0
+SANDBOX_MAX_WRITE_MB = 16
+
 
 def _load_dotenv() -> None:
     env_path = PROJECT_ROOT / ".env"
