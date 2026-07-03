@@ -7,7 +7,9 @@ import pandas as pd
 
 from quantbench.review.beta_exposure import compute_beta
 from quantbench.review.cost_sensitivity import CostSensitivityResult, run_cost_sensitivity_check
+from quantbench.review.cpcv import run_cpcv
 from quantbench.review.deflated_sharpe import MIN_DSR_OBSERVATIONS, deflated_sharpe_ratio
+from quantbench.review.lookback import estimate_lookback_bars
 from quantbench.review.lookahead import LookaheadIssue, detect_lookahead
 from quantbench.review.out_of_sample import OOSResult, run_out_of_sample_check
 from quantbench.review.pbo import PBOResult
@@ -16,7 +18,7 @@ from quantbench.review.regime import yearly_return_contribution
 from quantbench.review.symbol_concentration import symbol_concentration_from_factor_panel
 from quantbench.review.tail_dependence import MAX_BEST_DAYS, best_days_contribution_share
 from quantbench.review.walk_forward import WalkForwardResult, run_walk_forward
-from quantbench.engine.metrics import periods_per_year_from_timestamps
+from quantbench.engine.metrics import ICSignificance, ic_newey_west, periods_per_year_from_timestamps
 
 
 SEVERITY_ORDER = ("critical", "warning", "info", "pass")
@@ -29,6 +31,7 @@ BETA_ABS_WARNING = 0.7
 MIN_OOS_OBSERVATIONS = 30
 MIN_BETA_OBSERVATIONS = 30
 MIN_WALK_FORWARD_WINDOWS = 3
+MIN_CPCV_PATHS = 3
 UNIVERSE_COVERAGE_MISSING_WARNING = 0.10
 UNIVERSE_COVERAGE_MISSING_CRITICAL = 0.40
 
@@ -107,6 +110,8 @@ def run_review(
     pbo_result: PBOResult | None = None,
     universe_coverage: dict[str, Any] | None = None,
     funding_cost_sensitivity: dict[str, Any] | None = None,
+    ic_series: pd.Series | None = None,
+    ic_significance: ICSignificance | dict[str, Any] | None = None,
 ) -> ReviewReport:
     findings: list[ReviewFinding] = []
     findings.extend(_safe("lookahead", lambda: _lookahead_findings(code)))
@@ -114,7 +119,9 @@ def run_review(
     findings.extend(_safe("cost_sensitivity", lambda: [_cost_finding(run_cost_sensitivity_check(cost_bps, rerun_at_cost))]))
     findings.extend(_safe("parameter_stability", lambda: [_parameter_finding(run_parameter_stability_check(code, rerun_with_code))]))
     findings.extend(_safe("deflated_sharpe", lambda: [_dsr_finding(returns, n_trials, trial_sharpes)]))
-    findings.extend(_safe("walk_forward", lambda: [_walk_forward_finding(run_walk_forward(out_of_sample_data, run_on_data))]))
+    findings.extend(_safe("walk_forward", lambda: [_walk_forward_finding(run_walk_forward(returns))]))
+    findings.extend(_safe("cpcv", lambda: [_cpcv_finding(code, returns)]))
+    findings.extend(_safe("ic_significance", lambda: [_ic_significance_finding(ic_series, ic_significance)]))
     if pbo_result is not None:
         findings.append(_pbo_finding(pbo_result))
     findings.extend(_safe("regime", lambda: [_regime_finding(returns)]))
@@ -326,6 +333,43 @@ def _walk_forward_finding(result: WalkForwardResult) -> ReviewFinding:
     if result.positive_window_share < 0.5:
         return ReviewFinding("walk_forward", "warning", "Most walk-forward OOS windows have non-positive Sharpe.", detail)
     return ReviewFinding("walk_forward", "pass", "Walk-forward OOS windows did not breach warning thresholds.", detail)
+
+
+def _cpcv_finding(
+    code: str,
+    returns: pd.Series,
+) -> ReviewFinding:
+    lookback = estimate_lookback_bars(code, len(returns))
+    result = run_cpcv(returns, lookback_bars=lookback.lookback_bars)
+    detail = asdict(result)
+    detail["lookback_bars"] = lookback.lookback_bars
+    detail["lookback_source"] = lookback.source
+    if result.n_paths < MIN_CPCV_PATHS:
+        return ReviewFinding("cpcv", "info", "Not enough CPCV paths to evaluate purged OOS distribution.", detail)
+    tail_note = ""
+    if result.median_test_sharpe - result.p05_test_sharpe > 1.0:
+        tail_note = " The CPCV OOS distribution has a heavy left tail."
+    if result.positive_path_share < 0.5:
+        return ReviewFinding("cpcv", "warning", "Most purged CPCV OOS paths have non-positive Sharpe." + tail_note, detail)
+    return ReviewFinding("cpcv", "pass", "Purged CPCV OOS paths did not breach warning thresholds." + tail_note, detail)
+
+
+def _ic_significance_finding(
+    ic_series: pd.Series | None,
+    ic_significance: ICSignificance | dict[str, Any] | None,
+) -> ReviewFinding:
+    if ic_significance is None and ic_series is None:
+        return ReviewFinding("ic_significance", "info", "IC significance check applies only to cross-sectional runs.", {})
+    if ic_significance is None and ic_series is not None:
+        ic_significance = ic_newey_west(ic_series)
+    detail = ic_significance.to_dict() if isinstance(ic_significance, ICSignificance) else dict(ic_significance or {})
+    n_periods = int(detail.get("n_periods") or 0)
+    t_stat = detail.get("t_stat")
+    if n_periods < 10 or t_stat is None or pd.isna(t_stat):
+        return ReviewFinding("ic_significance", "info", "Not enough IC observations to evaluate Newey-West significance.", detail)
+    if not bool(detail.get("is_significant")):
+        return ReviewFinding("ic_significance", "warning", "Rank IC is not statistically significant after Newey-West correction.", detail)
+    return ReviewFinding("ic_significance", "pass", "Rank IC is statistically significant after Newey-West correction.", detail)
 
 
 def _regime_finding(returns: pd.Series) -> ReviewFinding:

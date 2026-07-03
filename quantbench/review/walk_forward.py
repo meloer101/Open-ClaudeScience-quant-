@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pandas as pd
+
+from quantbench.engine.metrics import annualized_sharpe, periods_per_year_from_timestamps
 
 
 @dataclass(frozen=True)
@@ -17,33 +18,43 @@ class WalkForwardResult:
 
 
 def run_walk_forward(
-    data: pd.DataFrame,
-    run_on_data: Callable[[pd.DataFrame], dict[str, float]],
+    returns: pd.Series,
     *,
     n_windows: int = 4,
     embargo_bars: int = 0,
 ) -> WalkForwardResult:
-    if n_windows < 1 or data.empty or len(data) < n_windows:
+    """Roll the OOS window across the already-computed period return series.
+
+    Like `run_cpcv`, this selects periods from a timestamp-indexed return series
+    rather than slicing a long panel by row position and recomputing. Row-position
+    slicing cuts through a single timestamp's cross-section in a long-format panel;
+    selecting periods from the return series sidesteps that entirely.
+    """
+    clean = pd.Series(returns, dtype="float64").replace([np.inf, -np.inf], np.nan).dropna()
+    n = int(len(clean))
+    if n_windows < 1 or n < n_windows:
         return WalkForwardResult([], 0.0, 0.0, 0.0, 0)
-    ordered = data.sort_values("timestamp").reset_index(drop=True) if "timestamp" in data.columns else data.reset_index(drop=True)
-    cut_points = np.linspace(0, len(ordered), n_windows + 1, dtype=int)
-    windows = [ordered.iloc[cut_points[index] : cut_points[index + 1]] for index in range(n_windows)]
+    periods = periods_per_year_from_timestamps(clean.index)
+    values = clean.to_numpy(dtype=float)
+    cut_points = np.linspace(0, n, n_windows + 1, dtype=int)
+    embargo = max(0, int(embargo_bars))
     sharpes: list[float] = []
-    for window in windows:
-        if embargo_bars > 0:
-            window = window.iloc[embargo_bars:]
-        if window.empty:
+    for window in range(n_windows):
+        start = int(cut_points[window])
+        end = int(cut_points[window + 1])
+        start = min(end, start + embargo)
+        if end <= start:
             continue
-        metrics = run_on_data(window.copy())
-        sharpes.append(round(float(metrics.get("sharpe", 0.0) or 0.0), 6))
+        segment = pd.Series(values[start:end], index=clean.index[start:end])
+        sharpes.append(round(float(annualized_sharpe(segment, periods)), 6))
     if not sharpes:
         return WalkForwardResult([], 0.0, 0.0, 0.0, 0)
-    values = np.array(sharpes, dtype=float)
-    q75, q25 = np.percentile(values, [75, 25])
+    array = np.array(sharpes, dtype=float)
+    q75, q25 = np.percentile(array, [75, 25])
     return WalkForwardResult(
         window_test_sharpes=sharpes,
-        median_test_sharpe=round(float(np.median(values)), 6),
+        median_test_sharpe=round(float(np.median(array)), 6),
         iqr_test_sharpe=round(float(q75 - q25), 6),
-        positive_window_share=round(float(np.mean(values > 0)), 6),
+        positive_window_share=round(float(np.mean(array > 0)), 6),
         n_windows=len(sharpes),
     )

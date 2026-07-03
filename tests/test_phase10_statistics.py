@@ -72,23 +72,20 @@ def test_pbo_returns_batch_overfit_probability_for_noise_configs():
 def test_walk_forward_reports_oos_distribution():
     from quantbench.review.walk_forward import run_walk_forward
 
-    data = pd.DataFrame(
-        {
-            "timestamp": pd.date_range("2021-01-01", periods=120, freq="1D", tz="UTC"),
-            "value": np.arange(120),
-        }
+    index = pd.date_range("2021-01-01", periods=120, freq="1D", tz="UTC")
+    rng = np.random.default_rng(5)
+    # First half positive drift, second half negative -> two positive windows,
+    # two negative windows, so positive_window_share is 0.5.
+    values = np.concatenate(
+        [rng.normal(0.01, 0.005, 60), rng.normal(-0.01, 0.005, 60)]
     )
+    returns = pd.Series(values, index=index)
 
-    def run_on_data(window: pd.DataFrame) -> dict[str, float]:
-        return {"sharpe": 1.0 if int(window["value"].iloc[0]) < 60 else -0.5}
-
-    result = run_walk_forward(data, run_on_data, n_windows=4)
+    result = run_walk_forward(returns, n_windows=4)
 
     assert result.n_windows == 4
-    assert result.window_test_sharpes == [1.0, 1.0, -0.5, -0.5]
-    assert result.median_test_sharpe == 0.25
     assert result.positive_window_share == 0.5
-    assert result.iqr_test_sharpe == 1.5
+    assert result.window_test_sharpes[0] > 0 and result.window_test_sharpes[-1] < 0
 
 
 def test_block_bootstrap_ci_contains_point_estimate():

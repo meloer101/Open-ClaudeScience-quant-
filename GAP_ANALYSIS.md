@@ -100,7 +100,7 @@
 ### 2.1 多重检验修正 / Deflated Sharpe Ratio / PBO（优先级：🔴 最高）
 
 **缺什么**：
-- [ ] **试验次数记账**：实验库记录"针对同一 universe × 时段，历史上总共试过多少个因子/参数组合"。这是所有修正方法的输入，且只有平台能自动做到（人工研究者自己都记不住）。
+- [x] **试验次数记账**：实验库记录"针对同一 universe × 时段，历史上总共试过多少个因子/参数组合"。这是所有修正方法的输入，且只有平台能自动做到（人工研究者自己都记不住）。
 - [x] **Deflated Sharpe Ratio（DSR）**：给定试验次数 N 和候选 Sharpe 的方差，修正后的 Sharpe 显著性。作为 `screen_factors` 流水线的**强制输出列**。
 - [x] **PBO（Probability of Backtest Overfitting）**：基于 CSCV（组合对称交叉验证）估计"样本内最优的配置在样本外表现低于中位数"的概率。
 - [x] Reviewer verdict 规则接入：DSR 不显著或 PBO 过高时，封顶 verdict（不给 STRONG）。
@@ -111,9 +111,9 @@
 **现状**：只有单一 train/test 切分（`out_of_sample.py`）。单次切分的 OOS 结果本身方差很大——运气好坏对 verdict 影响过大。
 
 **缺什么**：
-- [ ] Walk-forward 多窗口验证：滚动切分多个 train/test 窗口，报告 OOS 指标的分布而不是单点。
-- [ ] CPCV（Combinatorial Purged Cross-Validation）：带 purge/embargo 的组合式交叉验证，防止相邻窗口的信息泄漏（信号有 lookback 时训练/测试边界会重叠）。
-- [ ] Purge/embargo 逻辑与因子 lookback 长度联动（可从 `compute()` 的 rolling window 参数推断或要求显式声明）。
+- [x] Walk-forward 多窗口验证：滚动切分多个 train/test 窗口，报告 OOS 指标的分布而不是单点。
+- [x] CPCV（Combinatorial Purged Cross-Validation）：带 purge/embargo 的组合式交叉验证，防止相邻窗口的信息泄漏（信号有 lookback 时训练/测试边界会重叠）。
+- [x] Purge/embargo 逻辑与因子 lookback 长度联动（可从 `compute()` 的 rolling / shift / ewm / pct_change 参数推断或通过 `lookback_bars` 显式声明）。
 
 ### 2.3 置信区间与显著性表达（优先级：🟡 中）
 
@@ -121,8 +121,8 @@
 
 **缺什么**：
 - [x] Bootstrap（block bootstrap，尊重收益自相关）计算 Sharpe / 年化收益的置信区间。
-- [ ] IC 的 t 统计量 / Newey-West 修正标准误。
-- [ ] Research note 模板改为报告"Sharpe 1.42 [95% CI: 0.6, 2.1]"格式；ChartsPanel 相应展示区间。
+- [x] IC 的 t 统计量 / Newey-West 修正标准误。
+- [x] Research note 模板改为报告"Sharpe 1.42 [95% CI: 0.6, 2.1]"格式，并在截面 IC 行展示 Newey-West t/p/lags；ChartsPanel 相应展示区间。
 
 ---
 

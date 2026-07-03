@@ -86,6 +86,7 @@ def build_cross_sectional_research_note(
     critic_markdown: str = "",
     lineage_markdown: str = "",
     metrics_ci: dict[str, dict[str, float]] | None = None,
+    ic_significance: dict[str, Any] | None = None,
 ) -> str:
     warnings = warnings or []
     data_quality = data_quality or {}
@@ -99,7 +100,7 @@ def build_cross_sectional_research_note(
 ---
 """
 
-    metrics_rows = _metrics_rows(metrics, metrics_ci)
+    metrics_rows = _metrics_rows(metrics, metrics_ci, ic_significance=ic_significance)
     cache = config.get("cache") or {}
     data_slices = config.get("data_slices") or []
     funding = config.get("funding") or {}
@@ -269,12 +270,25 @@ def build_portfolio_research_note(
 """
 
 
-def _metrics_rows(metrics: dict[str, float], metrics_ci: dict[str, dict[str, float]] | None = None) -> str:
+def _metrics_rows(
+    metrics: dict[str, float],
+    metrics_ci: dict[str, dict[str, float]] | None = None,
+    *,
+    ic_significance: dict[str, Any] | None = None,
+) -> str:
     rows = []
     intervals = metrics_ci or {}
     for key, value in metrics.items():
         interval = intervals.get(key)
-        if key in {"sharpe", "annual_return"} and interval:
+        if key in {"rank_ic_mean", "ic_mean"} and ic_significance:
+            t_stat = ic_significance.get("t_stat")
+            p_value = ic_significance.get("p_value")
+            nw_lags = ic_significance.get("nw_lags")
+            suffix = f" (t={t_stat}, p={p_value}, NW-lags={nw_lags})"
+            if not ic_significance.get("is_significant"):
+                suffix += " - 未通过显著性"
+            rows.append(f"| {key} | {value}{suffix} |")
+        elif key in {"sharpe", "annual_return"} and interval:
             rows.append(f"| {key} | {value} [95% CI: {interval['lower']}, {interval['upper']}] |")
         else:
             rows.append(f"| {key} | {value} |")

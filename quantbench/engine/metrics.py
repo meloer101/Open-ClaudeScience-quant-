@@ -1,5 +1,9 @@
+from dataclasses import asdict, dataclass
+import math
+
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 
 DEFAULT_PERIODS_PER_YEAR = 252.0
@@ -56,6 +60,58 @@ def information_coefficient(signal: pd.Series, forward_returns: pd.Series) -> fl
         return 0.0
     corr = joined.iloc[:, 0].corr(joined.iloc[:, 1], method="spearman")
     return 0.0 if pd.isna(corr) else float(corr)
+
+
+@dataclass(frozen=True)
+class ICSignificance:
+    ic_mean: float
+    ic_std: float
+    t_stat: float
+    p_value: float
+    n_periods: int
+    nw_lags: int
+    is_significant: bool
+
+    def to_dict(self) -> dict[str, float | int | bool]:
+        return asdict(self)
+
+
+def ic_newey_west(ic_series: pd.Series, *, lags: int | None = None) -> ICSignificance:
+    clean = pd.Series(ic_series, dtype="float64").replace([np.inf, -np.inf], np.nan).dropna()
+    n_periods = int(len(clean))
+    if n_periods < 10:
+        return ICSignificance(0.0, 0.0, float("nan"), 1.0, n_periods, 0 if lags is None else max(0, int(lags)), False)
+
+    values = clean.to_numpy(dtype=float)
+    mean = float(np.mean(values))
+    std = float(np.std(values, ddof=1))
+    max_lags = max(0, n_periods - 1)
+    nw_lags = int(math.floor(4 * (n_periods / 100) ** (2 / 9))) if lags is None else int(lags)
+    nw_lags = max(0, min(nw_lags, max_lags))
+
+    centered = values - mean
+    gamma0 = float(np.dot(centered, centered) / n_periods)
+    hac_var = gamma0
+    for lag in range(1, nw_lags + 1):
+        covariance = float(np.dot(centered[lag:], centered[:-lag]) / n_periods)
+        weight = 1.0 - lag / (nw_lags + 1)
+        hac_var += 2.0 * weight * covariance
+    hac_var = max(hac_var, 0.0)
+    if hac_var <= 0:
+        t_stat = float("inf") if mean > 0 else float("-inf") if mean < 0 else 0.0
+        p_value = 0.0 if mean != 0 else 1.0
+    else:
+        t_stat = float(mean / math.sqrt(hac_var / n_periods))
+        p_value = float(2.0 * norm.sf(abs(t_stat)))
+    return ICSignificance(
+        ic_mean=round(mean, 6),
+        ic_std=round(std, 6),
+        t_stat=round(t_stat, 6) if math.isfinite(t_stat) else t_stat,
+        p_value=round(p_value, 6),
+        n_periods=n_periods,
+        nw_lags=nw_lags,
+        is_significant=bool(abs(t_stat) > 1.96),
+    )
 
 
 def monotonicity_score(values: pd.Series) -> float:

@@ -68,14 +68,11 @@ def test_overfit_factor_golden_gets_dsr_and_walk_forward_warnings():
     from quantbench.review import run_review
 
     index = pd.date_range("2021-01-01", periods=160, freq="1D", tz="UTC")
-    returns = pd.Series(np.random.default_rng(22).normal(0.0, 0.01, len(index)), index=index)
+    # Overfit factor with no real edge: a negative-drift OOS return stream makes
+    # both the deflated Sharpe (under 25 trials) and the walk-forward window
+    # distribution flag it.
+    returns = pd.Series(np.random.default_rng(22).normal(-0.002, 0.01, len(index)), index=index)
     data = pd.DataFrame({"timestamp": index, "close": 100 * (1 + returns).cumprod()})
-
-    def run_on_data(frame: pd.DataFrame) -> dict[str, float]:
-        if len(frame) > 45:
-            return {"sharpe": 0.2}
-        midpoint = data["timestamp"].iloc[40]
-        return {"sharpe": 1.0 if frame["timestamp"].iloc[0] < midpoint else -1.0}
 
     report = run_review(
         code="def compute(df):\n    return df['close'].pct_change(20).fillna(0.0)\n",
@@ -84,7 +81,7 @@ def test_overfit_factor_golden_gets_dsr_and_walk_forward_warnings():
         rerun_at_cost=lambda bps: {"sharpe": 0.2},
         rerun_with_code=lambda candidate: {"sharpe": 0.2},
         out_of_sample_data=data,
-        run_on_data=run_on_data,
+        run_on_data=lambda frame: {"sharpe": -1.0},
         n_trials=25,
         trial_sharpes=[0.1, 0.2, 0.05, -0.1],
         benchmark_returns=None,
@@ -95,6 +92,33 @@ def test_overfit_factor_golden_gets_dsr_and_walk_forward_warnings():
     assert severities["deflated_sharpe"] == "warning"
     assert severities["walk_forward"] == "warning"
     assert report.verdict in {"WEAK", "PROMISING"}
+
+
+def test_overfit_factor_golden_gets_cpcv_warning():
+    from quantbench.review import run_review
+
+    index = pd.date_range("2021-01-01", periods=300, freq="1D", tz="UTC")
+    # An overfit factor whose out-of-sample edge is actually negative: every
+    # combinatorial purged path lands non-positive, so CPCV must warn.
+    returns = pd.Series(np.random.default_rng(23).normal(-0.002, 0.01, len(index)), index=index)
+    data = pd.DataFrame({"timestamp": index, "close": 100 * (1 + returns).cumprod()})
+
+    report = run_review(
+        code="def compute(df):\n    return df['close'].pct_change(20).fillna(0.0)\n",
+        returns=returns,
+        cost_bps=0,
+        rerun_at_cost=lambda bps: {"sharpe": 0.2},
+        rerun_with_code=lambda candidate: {"sharpe": 0.2},
+        out_of_sample_data=data,
+        run_on_data=lambda frame: {"sharpe": -1.0},
+        benchmark_returns=None,
+        turnover_annual=10,
+    )
+
+    cpcv = next(finding for finding in report.findings if finding.check == "cpcv")
+    assert cpcv.severity == "warning"
+    assert cpcv.detail["positive_path_share"] < 0.5
+    assert report.verdict in {"PROMISING", "WEAK"}
 
 
 def test_single_trial_robust_factor_golden_is_not_dsr_penalized():
@@ -120,6 +144,18 @@ def test_single_trial_robust_factor_golden_is_not_dsr_penalized():
     dsr = next(finding for finding in report.findings if finding.check == "deflated_sharpe")
     assert dsr.severity == "info"
     assert report.verdict in {"STRONG", "PROMISING"}
+
+
+def test_ic_newey_west_golden_separates_robust_ic_from_noise_winner():
+    from quantbench.engine.metrics import ic_newey_west
+
+    robust = pd.Series(np.full(80, 0.04) + np.random.default_rng(1).normal(0.0, 0.01, 80))
+    rng = np.random.default_rng(52)
+    noise_batch = {f"noise_{index}": pd.Series(rng.normal(0.0, 0.1, 60)) for index in range(20)}
+    winner = noise_batch[max(noise_batch, key=lambda name: float(noise_batch[name].mean()))]
+
+    assert ic_newey_west(robust).is_significant
+    assert not ic_newey_west(winner).is_significant
 
 
 def test_regime_factor_golden_warns_on_concentrated_year():

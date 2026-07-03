@@ -11,6 +11,8 @@ from quantbench.engine.metrics import (
     annualized_return,
     annualized_sharpe,
     compute_drawdown,
+    ICSignificance,
+    ic_newey_west,
     monotonicity_score,
     periods_per_year_from_timestamps,
 )
@@ -25,12 +27,14 @@ class CrossSectionalBacktestResult:
     factor_panel: pd.DataFrame
     group_returns: pd.DataFrame
     ic_series: pd.Series
+    ic_significance: ICSignificance
     turnover: pd.Series
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "metrics": self.metrics,
             "metrics_ci": metrics_ci(self.returns),
+            "ic_significance": self.ic_significance.to_dict(),
             "series": {
                 "timestamp": [str(item) for item in self.returns.index],
                 "long_short_returns": self.returns.fillna(0).round(10).tolist(),
@@ -158,6 +162,7 @@ def run_cross_sectional_backtest(
         factor_panel=factor_panel,
         group_returns=group_returns,
         ic_series=ic_series,
+        ic_significance=ic_newey_west(ic_series),
         turnover=turnover,
     )
 

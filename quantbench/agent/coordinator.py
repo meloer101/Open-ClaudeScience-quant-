@@ -35,6 +35,7 @@ from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
 from quantbench.review import CriticReport, ReviewFinding, ReviewReport, determine_verdict, run_critic, run_review
 from quantbench.review.report import _dsr_finding, _pbo_finding
+from quantbench.review.lookback import estimate_lookback_bars
 from quantbench.factors.parametrize import apply_overrides
 from quantbench.factors.store import FactorStore
 from quantbench.library.aggregate import summarize as summarize_library
@@ -364,7 +365,7 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
         ctx.last_metrics = backtest.metrics
         ctx.cost_bps = cost_bps
         run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
-        run.save_json("backtest_result.json", backtest.to_json_dict())
+        run.save_json("backtest_result.json", _backtest_payload_with_factor_metadata(backtest, code, len(ctx.data_df)))
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
         save_drawdown_plot(backtest.drawdown, run.run_dir / "drawdown.png")
 
@@ -499,7 +500,7 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
         # that name drifted from the single-symbol path's and matches nothing else in the
         # codebase or README's documented artifact layout; readers like ChartsPanel and
         # library/compare.py's compute_returns_correlation() look for one canonical name).
-        run.save_json("backtest_result.json", backtest.to_json_dict())
+        run.save_json("backtest_result.json", _backtest_payload_with_factor_metadata(backtest, code, len(panel)))
         run.save_json("data_quality_report.json", ctx.data_quality.to_dict())
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
         save_drawdown_plot(backtest.drawdown, run.run_dir / "drawdown.png")
@@ -537,6 +538,8 @@ def _build_registry(ctx: _RunContext, run, run_store: ArtifactStore, critic_llm,
             turnover_annual=backtest.metrics.get("turnover_annual"),
             universe_coverage=(cache_meta.get("coverage_report") if isinstance(cache_meta, dict) else None),
             funding_cost_sensitivity=funding_sensitivity,
+            ic_series=backtest.ic_series,
+            ic_significance=backtest.ic_significance,
         )
         ctx.review_report = review_report
         run.save_json("review_report.json", review_report.to_dict())
@@ -730,7 +733,7 @@ def _build_fork_registry(ctx: _RunContext, run) -> SkillRegistry:
         ctx.last_metrics = backtest.metrics
         ctx.cost_bps = cost_bps
         run.save_code("signal.py", SIGNAL_FILE_HEADER + code + SIGNAL_FILE_HARNESS)
-        run.save_json("backtest_result.json", backtest.to_json_dict())
+        run.save_json("backtest_result.json", _backtest_payload_with_factor_metadata(backtest, code, len(ctx.data_df)))
         save_equity_curve_plot(backtest.equity_curve, run.run_dir / "equity_curve.png")
         save_drawdown_plot(backtest.drawdown, run.run_dir / "drawdown.png")
 
@@ -860,6 +863,7 @@ def _run_screen_candidate(
             "timeframe": timeframe,
             "parent_run_id": parent_run_id,
             "screen_candidate": candidate["name"],
+            "factor_metadata": _factor_metadata(candidate["code"], len(panel)),
         }
     )
     try:
@@ -892,7 +896,7 @@ def _run_screen_candidate(
 
         panel_path = child.run_dir / "panel.parquet"
         panel.to_parquet(panel_path, index=False)
-        child.save_json("backtest_result.json", backtest.to_json_dict())
+        child.save_json("backtest_result.json", _backtest_payload_with_factor_metadata(backtest, candidate["code"], len(panel)))
         child.save_json("data_quality_report.json", ctx.data_quality.to_dict())
         save_equity_curve_plot(backtest.equity_curve, child.run_dir / "equity_curve.png")
         save_drawdown_plot(backtest.drawdown, child.run_dir / "drawdown.png")
@@ -927,6 +931,8 @@ def _run_screen_candidate(
             n_trials=effective_trials,
             universe_coverage=(cache_meta.get("coverage_report") if isinstance(cache_meta, dict) else None),
             funding_cost_sensitivity=funding_sensitivity,
+            ic_series=backtest.ic_series,
+            ic_significance=backtest.ic_significance,
         )
         ctx.review_report = review_report
         child.save_json("review_report.json", review_report.to_dict())
@@ -968,6 +974,7 @@ def _run_screen_candidate(
             "timeframe": timeframe,
             "parent_run_id": parent_run_id,
             "screen_candidate": candidate["name"],
+            "factor_metadata": _factor_metadata(candidate["code"], len(panel)),
         }
         child.save_config(config)
         note = build_cross_sectional_research_note(
@@ -981,6 +988,7 @@ def _run_screen_candidate(
             review_report.to_markdown(),
             ctx.critic_report.to_markdown() if ctx.critic_report else "",
             metrics_ci=_metrics_ci_for_run(child.run_dir),
+            ic_significance=backtest.ic_significance.to_dict(),
         )
         child.save_text("research_note.md", note)
         child.save_json("conversation.json", [])
@@ -1026,6 +1034,8 @@ def _screen_item(
     critic_report: CriticReport | None,
 ) -> dict[str, Any]:
     dsr = _finding_detail(review_report, "deflated_sharpe")
+    cpcv = _finding_detail(review_report, "cpcv")
+    ic_sig = _finding_detail(review_report, "ic_significance")
     return {
         "name": name,
         "run_id": run_id,
@@ -1035,6 +1045,8 @@ def _screen_item(
         "critic_agrees": critic_report.agrees_with_deterministic_verdict if critic_report else None,
         "sharpe": metrics.get("sharpe"),
         "dsr": dsr,
+        "cpcv": cpcv,
+        "ic_significance": ic_sig,
     }
 
 
@@ -1528,6 +1540,9 @@ class Coordinator:
             reproduce_data_path = str(ctx.data_path)
         else:
             reproduce_data_path = None
+        factor_observations = len(ctx.panel_df) if ctx.panel_df is not None else None
+        if factor_observations is None and ctx.data_df is not None:
+            factor_observations = len(ctx.data_df)
 
         config = {
             "hypothesis": user_request,
@@ -1547,6 +1562,7 @@ class Coordinator:
             "parent_run_id": parent_run_id,
             "derived_from_factor": derived_from_factor,
             "injected_skills": ctx.injected_skills,
+            "factor_metadata": _factor_metadata(ctx.signal_code or "", factor_observations),
         }
         run.save_config(config)
 
@@ -1574,6 +1590,7 @@ class Coordinator:
                 ctx.review_report.to_markdown() if ctx.review_report else "",
                 ctx.critic_report.to_markdown() if ctx.critic_report else "",
                 metrics_ci=_metrics_ci_for_run(run.run_dir),
+                ic_significance=_ic_significance_for_run(run.run_dir),
             )
         else:
             note = build_research_note(
@@ -1983,6 +2000,29 @@ def _metrics_ci_for_run(run_dir: Path) -> dict[str, dict[str, float]] | None:
         return None
     metrics_ci = payload.get("metrics_ci")
     return metrics_ci if isinstance(metrics_ci, dict) else None
+
+
+def _factor_metadata(code: str, total_observations: int | None = None) -> dict[str, Any]:
+    estimate = estimate_lookback_bars(code, total_observations)
+    return {"lookback_bars": estimate.lookback_bars, "lookback_source": estimate.source}
+
+
+def _backtest_payload_with_factor_metadata(backtest: Any, code: str, total_observations: int | None = None) -> dict[str, Any]:
+    payload = backtest.to_json_dict()
+    payload["factor_metadata"] = _factor_metadata(code, total_observations)
+    return payload
+
+
+def _ic_significance_for_run(run_dir: Path) -> dict[str, Any] | None:
+    path = run_dir / "backtest_result.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    ic_significance = payload.get("ic_significance")
+    return ic_significance if isinstance(ic_significance, dict) else None
 
 
 def _fork_lineage_markdown(parent_run_id: str, parent_signal_code: str, child_signal_path: Path, child_metrics: dict[str, float]) -> str:
