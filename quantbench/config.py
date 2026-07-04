@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_CACHE_DIR = PROJECT_ROOT / "data_cache"
 RUNS_DIR = PROJECT_ROOT / "runs"
 FACTORS_DIR = PROJECT_ROOT / "factors"
+LITERATURE_DIR = PROJECT_ROOT / "literature"
 SKILL_DOCS_DIR = PROJECT_ROOT / "skills_docs"
 MCP_SERVERS_CONFIG = PROJECT_ROOT / "mcp_servers.json"
 DEFAULT_COST_BPS = 5.0

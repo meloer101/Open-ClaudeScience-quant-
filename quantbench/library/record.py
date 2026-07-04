@@ -45,6 +45,8 @@ class ExperimentRecord:
     window_start: str | None = None
     window_end: str | None = None
     error_summary: str | None = None
+    literature_paper_id: str | None = None
+    literature_title: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -60,6 +62,7 @@ def build_record(run_id: str) -> ExperimentRecord:
     findings = review.get("findings") or []
     parent_run_id = manifest.get("parent_run_id") or config.get("parent_run_id")
     hypothesis = config.get("hypothesis") or manifest.get("user_request") or run_reader.read_user_request(run_id)
+    lit_source = manifest.get("literature_source") or config.get("literature_source") or {}
 
     return ExperimentRecord(
         run_id=run_id,
@@ -85,6 +88,8 @@ def build_record(run_id: str) -> ExperimentRecord:
         window_start=_window_value(config, "start"),
         window_end=_window_value(config, "end"),
         error_summary=_error_summary(run_id) if status == "failed" else None,
+        literature_paper_id=lit_source.get("paper_id") if isinstance(lit_source, dict) else None,
+        literature_title=lit_source.get("title") if isinstance(lit_source, dict) else None,
     )
 
 

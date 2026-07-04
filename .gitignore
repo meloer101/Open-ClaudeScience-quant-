@@ -7,3 +7,4 @@ runs/
 .claude/*.local.json
 /memory/
 /factors/
+/literature/

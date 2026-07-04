@@ -32,6 +32,7 @@ class ExperimentIndex:
         min_sharpe: float | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        source: str | None = None,
     ) -> "ExperimentIndex":
         records = self.records
         if verdicts:
@@ -47,6 +48,14 @@ class ExperimentIndex:
             records = [record for record in records if _date_key(record.created_at) >= _date_key(created_after)]
         if created_before:
             records = [record for record in records if _date_key(record.created_at) <= _date_key(created_before)]
+        if source:
+            needle = source.strip().lower()
+            records = [
+                record
+                for record in records
+                if (record.literature_paper_id or "").lower() == needle
+                or needle in (record.literature_title or "").lower()
+            ]
         return ExperimentIndex(records=list(records))
 
     def sort(self, field: str, *, descending: bool = True) -> "ExperimentIndex":

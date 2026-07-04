@@ -737,6 +737,81 @@ class Coordinator:
             prompt_override=seed_request,
         )
 
+    def run_from_paper(
+        self,
+        paper_id: str,
+        request: str | None = None,
+        *,
+        focus: str | None = None,
+        skill_names: list[str] | None = None,
+        paper_store: "PaperStore | None" = None,
+    ) -> RunResult:
+        """Literature reproduction pipeline (GAP 4.3). Reads a paper with the
+        Literature Agent (the 4th SubAgent), distills one factor, then runs the
+        NORMAL QuantBench workflow via execute() with a seed prompt - exactly
+        like run_from_factor, but seeded from a paper instead of a saved factor.
+        After the run, writes a reproduction_comparison.json artifact diffing the
+        paper's reported numbers against what we actually measured, and appends
+        that table to the research note.
+
+        `focus`, if given (e.g. a highlighted PDF selection from the web UI),
+        narrows the extraction to that passage."""
+        from quantbench.literature.agent import extract_factor
+        from quantbench.literature.reproduction import (
+            build_reproduction_comparison,
+            render_comparison_markdown,
+        )
+        from quantbench.literature.store import PaperStore
+
+        store = paper_store or PaperStore()
+        paper = store.load(paper_id)
+
+        extraction_usage: list[dict[str, Any]] = []
+        extraction = extract_factor(self.llm, paper, focus=focus, usage_sink=extraction_usage)
+        lit_source = paper.literature_source(extraction.page_anchors)
+
+        clean_request = request or f"复现论文《{paper.title}》中的因子 `{extraction.factor_name}`。"
+        caveats = "\n".join(f"- {item}" for item in extraction.known_caveats) or "- none recorded"
+        assumptions = "\n".join(f"- {item}" for item in extraction.assumptions) or "- none recorded"
+        reported = json.dumps(extraction.reported_results or {}, ensure_ascii=False)
+        seed_request = (
+            f"Reproduce a factor distilled from the paper: {paper.citation()}\n"
+            f"Factor name: {extraction.factor_name}\n"
+            f"Economic hypothesis (why this should be alpha):\n{extraction.economic_hypothesis}\n\n"
+            f"Formula:\n{extraction.formula}\n\n"
+            f"How to implement compute(df) (df has open/high/low/close/volume):\n{extraction.compute_spec}\n\n"
+            f"Suggested universe: {extraction.suggested_universe or 'use your judgement'}; "
+            f"timeframe: {extraction.suggested_timeframe or 'use your judgement'}; "
+            f"asset class: {extraction.asset_class or 'unknown'}; "
+            f"direction: {extraction.direction or 'long_high'}.\n"
+            f"Paper's reported results (for later comparison, do NOT hardcode): {reported}\n"
+            f"Assumptions (paper left these unspecified):\n{assumptions}\n"
+            f"Known caveats:\n{caveats}\n\n"
+            "Implement compute() per the spec and run the normal QuantBench workflow "
+            "(fetch data, build universe if cross-sectional, backtest, review). You may adapt "
+            "the implementation if the data or scenario requires it.\n"
+            f"User request: {clean_request}"
+        )
+
+        run = self.run_store.create_run(f"Reproduce paper {paper.paper_id}: {clean_request}")
+        run.save_json("factor_extraction.json", extraction.to_dict())
+        result = self.execute(
+            run,
+            clean_request,
+            skill_names=skill_names,
+            prompt_override=seed_request,
+            literature_source=lit_source,
+            extra_llm_usage=extraction_usage,
+        )
+
+        comparison = build_reproduction_comparison(extraction, result.metrics, literature_source=lit_source)
+        run.save_json("reproduction_comparison.json", comparison)
+        note_path = run.run_dir / "research_note.md"
+        if note_path.exists():
+            existing = note_path.read_text(encoding="utf-8")
+            note_path.write_text(existing + "\n\n" + render_comparison_markdown(comparison), encoding="utf-8")
+        return result
+
     def run_fork(self, parent_run_id: str, modification_request: str) -> RunResult:
         run = self.run_store.create_run(f"Fork {parent_run_id}: {modification_request}")
         return self.execute_fork(run, parent_run_id, modification_request)
@@ -788,6 +863,8 @@ class Coordinator:
         session_context: str | None = None,
         session_id: str | None = None,
         turn_index: int | None = None,
+        literature_source: dict[str, Any] | None = None,
+        extra_llm_usage: list[dict[str, Any]] | None = None,
     ) -> RunResult:
         """Drive the tool-use loop for an already-created Run.
 
@@ -822,6 +899,11 @@ class Coordinator:
 
         ctx = _RunContext()
         ctx.staging_confirm = staging_confirm
+        # Literature extraction (run_from_paper) happens before this ctx exists;
+        # seed its LLM usage here so the Literature Agent's token/cost footprint
+        # lands in the manifest's llm_usage like every other sub-agent.
+        if extra_llm_usage:
+            ctx.llm_usage.extend(extra_llm_usage)
         ctx.memory_default_facts = self.memory_store.default_facts()
         mcp_manager = MCPClientManager(self._mcp_configs, ctx) if self._mcp_configs else None
 
@@ -894,6 +976,7 @@ class Coordinator:
             "session_id": session_id,
             "turn_index": turn_index,
             "applied_memory_defaults": ctx.applied_memory_defaults,
+            "literature_source": literature_source,
         }
         run.save_config(config)
 
@@ -960,6 +1043,7 @@ class Coordinator:
             applied_memory_defaults=ctx.applied_memory_defaults,
             memory_events=ctx.memory_events,
             llm_usage=ctx.llm_usage,
+            literature_source=literature_source,
         )
         if mcp_manager is not None:
             mcp_manager.close()

@@ -45,6 +45,9 @@ def main(args: tuple[str, ...]) -> None:
     if args[0] == "universe":
         _universe(args[1:])
         return
+    if args[0] == "literature":
+        _literature(args[1:], forced_skills)
+        return
     _run_request(" ".join(args), forced_skills)
 
 
@@ -55,6 +58,7 @@ def _library_list(args: tuple[str, ...]) -> None:
     sort_field = _option_value(args, "--sort") or "created_at"
     min_sharpe_value = _option_value(args, "--min-sharpe")
     min_sharpe = float(min_sharpe_value) if min_sharpe_value is not None else None
+    source = _option_value(args, "--source")
     json_output = "--json-output" in args
 
     index = (
@@ -64,6 +68,7 @@ def _library_list(args: tuple[str, ...]) -> None:
             asset_class=asset_class,
             factor_family=factor_family,
             min_sharpe=min_sharpe,
+            source=source,
         )
         .sort(sort_field)
     )
@@ -384,6 +389,64 @@ def _universe(args: tuple[str, ...]) -> None:
 
     written = record_crypto_universe_snapshot(get_connection(), as_of_date, quote=quote, limit=limit)
     click.echo(f"Snapshotted {written} {quote} perpetual symbol(s) for {as_of_date}.")
+
+
+def _literature(args: tuple[str, ...], forced_skills: list[str] | None = None) -> None:
+    """Literature ingestion (GAP 4.3): ingest / extract / reproduce.
+
+    A bare `quantbench literature <pdf|arxiv-url>` is shorthand for the full
+    ingest -> extract -> reproduce pipeline in one step."""
+    if not args:
+        raise click.UsageError(
+            "literature requires a subcommand (ingest/extract/reproduce) or a PDF path / arXiv URL"
+        )
+
+    from quantbench.literature.ingest import ingest_and_store
+    from quantbench.literature.store import PaperStore
+
+    store = PaperStore()
+    subcommand = args[0]
+
+    if subcommand == "ingest":
+        if len(args) < 2:
+            raise click.UsageError("literature ingest requires a PDF path or arXiv URL")
+        paper = ingest_and_store(args[1], store)
+        click.echo(f"paper_id: {paper.paper_id}")
+        click.echo(f"title: {paper.title}")
+        click.echo(f"pages: {paper.n_pages}")
+        click.echo(f"source: {paper.source}")
+        return
+
+    if subcommand == "list":
+        for meta in store.list_papers():
+            click.echo(f"{meta['paper_id']}  {meta.get('n_pages', '?')}p  {meta.get('title', '')}")
+        return
+
+    if subcommand == "extract":
+        if len(args) < 2:
+            raise click.UsageError("literature extract requires a paper_id")
+        from quantbench.literature.agent import extract_factor
+
+        paper = store.load(args[1])
+        extraction = extract_factor(Coordinator().llm, paper)
+        click.echo(json.dumps(extraction.to_dict(), ensure_ascii=False, indent=2))
+        return
+
+    if subcommand == "reproduce":
+        if len(args) < 2:
+            raise click.UsageError("literature reproduce requires a paper_id")
+        request = _option_value(args[2:], "--request")
+        result = Coordinator().run_from_paper(
+            args[1], request, skill_names=forced_skills, paper_store=store
+        )
+        _echo_run_result(result)
+        return
+
+    # Shorthand: `literature <pdf|arxiv-url>` = ingest + reproduce in one step.
+    paper = ingest_and_store(subcommand, store)
+    click.echo(f"Ingested paper_id {paper.paper_id}: {paper.title}")
+    result = Coordinator().run_from_paper(paper.paper_id, skill_names=forced_skills, paper_store=store)
+    _echo_run_result(result)
 
 
 def _skill(args: tuple[str, ...]) -> None:
