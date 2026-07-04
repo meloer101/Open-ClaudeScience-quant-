@@ -14,7 +14,7 @@
 | 二 | 统计严谨性 | ✅ 完成 | DSR / PBO / walk-forward / CPCV / bootstrap / IC 显著性(Phase 10/10.5) |
 | 三 | 回测现实性 | ✅ 完成 | 执行价 / 流动性成本+容量 / borrow / 中性化(Phase 12)+ beta 中性化修复 |
 | 四 | 产品形态 | 🟡 基本完成 | 沙箱 / MCP / SKILL.md / 审查台 / Session+记忆 / 远程接口(PHASE13B);剩 4.3 文献接入、4.4 provider 信任层、4.5 Docker(推后) |
-| 五 | roadmap 缺失议题 | 🔴 主体未做 | 5.1 golden runs(fixture 已有、纪律未建全)、5.2 Alpha 生命周期(监控已有、状态机/paper 未做)、5.3 信号导出(未做)、5.4 可观测性(部分) |
+| 五 | roadmap 缺失议题 | 🟡 5.1 已完成,余下未做 | 5.1 golden runs 纪律 ✅ 已完成(注册表+汇总+CI);5.2 Alpha 生命周期(监控已有、状态机/paper 未做)、5.3 信号导出(未做)、5.4 可观测性(部分) |
 | 六/七 | 开发顺序 / 架构决策 | ✅ 已执行 | 不引 Agent 框架、MCP 作 client、SubAgent 自有抽象——均已落地 |
 
 ---
@@ -32,6 +32,7 @@
   - 1.5 Session + 记忆系统(三层四流动:Session / 长期记忆 / 持久记录,含自动 consolidation + "只喂默认不静默改假设"铁律)
   - 1.6 远程计算接口预留(ExecutionBackend,local 实装 / remote stub)
 - **架构基建**:coordinator 拆分、SubAgent 抽象(Critic + 记忆固化两个实例)、manifest 审计段(delegations/sandbox_usage/mcp_calls/staging/applied_memory_defaults/memory_events)。
+- **5.1 Golden runs 纪律**:[tests/golden_run_registry.py](tests/golden_run_registry.py)(6 个 case,覆盖 lookahead/overfit/robust-classic/regime 四类)+ [tests/test_golden_run_discipline.py](tests/test_golden_run_discipline.py)(逐 case 断言 + 汇总表)+ [.github/workflows/tests.yml](.github/workflows/tests.yml)(仓库首个 CI,push to main 触发,无需密钥)。已实测验证阈值改动能被精确抓到。
 
 ---
 
@@ -49,8 +50,8 @@
 - [ ] **4.5 Docker 沙箱**(设计推后):受限子进程已覆盖 80%;macOS 上 RLIMIT_AS 无效是已知平台差异。真实需要更强隔离时再上。
 - [ ] 审查台/CLI 交互增强(staging 的完整 plan-first 上游对象、CLI 内联编辑)——非阻塞增强项。
 
-### 第五章 · roadmap 缺失的整块议题(🔴 最大未开垦地)
-- [ ] **5.1 Golden runs 纪律**(🟡 partial):fixture 集 [test_phase10_golden_runs.py](tests/test_phase10_golden_runs.py) **已存在**;但"每次改 prompt/换模型/调阈值后跑评测集、输出 verdict 混淆矩阵、纳入 CI"的**纪律未建全**。系统这半年积累了巨量 Reviewer findings 与 verdict 逻辑,却没有回归锁——prompt 一改可能整体漂移无人察觉。**成本低、保护面最大。**
+### 第五章 · roadmap 缺失的整块议题(🟡 5.1 已完成,最大未开垦地仍是 5.2)
+- [x] **5.1 Golden runs 纪律**——已完成,见上「二、已完成」。
 - [ ] **5.2 Alpha 生命周期 / paper tracking**(🟡 partial):live 监控 + 衰减预警([monitor/decay.py](quantbench/monitor/decay.py))**已有**;但**因子状态机**(`research → paper_tracking → live_candidate → decayed → retired`)、**paper tracking**(对 ≥PROMISING 因子每日算假想收益)、**统计衰减判定**(CUSUM/滚动检验)**未做**。这是"研究平台 vs 回测玩具"的分水岭,**且已被 Session/记忆系统解锁**(session 天然是一组相关因子的容器)。
 - [ ] **5.3 信号导出**(未做):通过审查的因子 → 当期目标权重 JSON/Parquet(含时间戳、数据版本、因子 hash、完整溯源)。研究→生产的交接面。
 - [ ] **5.4 成本/用量可观测性**(🟡 partial):`sandbox_usage`(CPU/内存/wall)**已有**;LLM token 用量+成本、数据 API 调用数、screen 前成本预估**未做**。
@@ -61,15 +62,13 @@
 
 沿项目既有"先正确性、后体验"原则,建议顺序:
 
-### 🥇 第一优先:5.1 Golden runs 纪律(最高性价比)
-**为什么先做**:系统刚在半年内堆了 sandbox/MCP/审查台/记忆/一整套新 Reviewer findings 与 verdict 逻辑——**改动面最大、却没有判断质量的回归锁**。fixture 已在手,缺的是把它变成"每次 prompt/模型/阈值改动后强制跑 + 混淆矩阵 + CI"的纪律。成本最低、保护刚建成的一切,**应立刻做**。
-- 规模:小。依赖:无(fixture 已有,合成数据)。风险:低。
+### 🥇 已完成:5.1 Golden runs 纪律
 
-### 🥈 第二优先:5.2 Alpha 生命周期 / paper tracking(最大产品跃迁)
+### 🥈 第一优先:5.2 Alpha 生命周期 / paper tracking(最大产品跃迁)
 **为什么第二**:这是"研究平台"真正成立的最后一块,而且 **Session/记忆刚落地已解锁它**(session = 一组相关因子的容器)。监控/衰减已有,补上"因子状态机 + 每日 paper tracking + 统计衰减判定"即闭环。
 - 规模:中大。依赖:每日数据快照机制(与第一章 1.2 退市数据的"每日快照"共用,一举两得)。风险:中(需长期运行的定时任务)。
 
-### 🥉 第三优先:第一章数据收尾(crypto PIT + 退市快照 + PerpetualData)
+### 🥉 第二优先:第一章数据收尾(crypto PIT + 退市快照 + PerpetualData)
 **为什么第三**:crypto 截面结论至今带非-PIT 警告——这是正确性缺口。且"每日快照"机制**同时喂 5.2 的 paper tracking**,与第二优先天然合并。
 - 规模:中(有外部数据依赖,费工)。风险:中。
 
@@ -82,7 +81,7 @@
 
 ## 五、一句话建议
 
-**立刻做 5.1(锁住已建成的判断质量),然后把 5.2 paper tracking 与第一章"每日快照"合并成一个"Alpha 生命周期 + 数据积累"的阶段做——这两件共用同一套每日快照基建,一起做省一半工,且正好把系统推过"研究平台"的分水岭。**
+**5.1 已锁住已建成的判断质量。下一步把 5.2 paper tracking 与第一章"每日快照"合并成一个"Alpha 生命周期 + 数据积累"的阶段做——这两件共用同一套每日快照基建,一起做省一半工,且正好把系统推过"研究平台"的分水岭。**
 
 ---
 

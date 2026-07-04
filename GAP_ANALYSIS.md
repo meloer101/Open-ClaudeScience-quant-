@@ -238,13 +238,13 @@ VISION Phase 5 的 SSH/Modal 支持未实现。批量因子筛选 + CPCV + boots
 Claude Science 背后有 eval 文化。QuantBench 的 Coordinator/Reviewer/Critic 的判断质量目前**没有任何回归保障**——prompt 改一版、模型换一代，verdict 可能整体漂移而无人察觉。
 
 **缺什么**：
-- [ ] 一组 golden runs 固定评测集：
-  - 已知含未来函数的因子（Reviewer 必须抓到）
-  - 已知过拟合的因子（参数扰动/OOS 必须暴露）
-  - 已知稳健的经典因子（不应被误杀）
-  - 已知 regime 依赖的因子
-- [ ] 每次修改 prompt / 升级模型 / 改 Reviewer 阈值后跑评测集，输出 verdict 混淆矩阵。
-- [ ] 纳入 CI（合成 fixture 数据即可，不依赖外部 API）。
+- [x] 一组 golden runs 固定评测集（[tests/golden_run_registry.py](tests/golden_run_registry.py)，6 个 case）：
+  - 已知含未来函数的因子（Reviewer 必须抓到）—— `lookahead_factor`
+  - 已知过拟合的因子（参数扰动/OOS 必须暴露）—— `noise_batch_dsr_pbo` / `overfit_dsr_walkforward` / `overfit_cpcv`
+  - 已知稳健的经典因子（不应被误杀）—— `single_trial_robust`
+  - 已知 regime 依赖的因子 —— `regime_concentrated`
+- [x] 每次修改 prompt / 升级模型 / 改 Reviewer 阈值后跑评测集，输出 verdict 汇总表（[tests/test_golden_run_discipline.py](tests/test_golden_run_discipline.py) 的 `render_summary`——逐 case 期望 vs 实际 verdict 一览，而非字面意义的行×列混淆矩阵：6 个 case 分散在 4 个 verdict 桶里，真正的混淆矩阵信息量很低，等价的"期望/实际"一览表更实用，且已实测验证阈值改动能被精确抓到并给出可读的 mismatch 详情）。
+- [x] 纳入 CI（[.github/workflows/tests.yml](.github/workflows/tests.yml)，合成 fixture 数据，不依赖外部 API/密钥——Reviewer/verdict 逻辑是纯确定性 Python）。
 
 ### 5.2 Alpha 生命周期管理（优先级：🟡 中，Phase 6 需要展开）
 
