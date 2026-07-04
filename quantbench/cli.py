@@ -42,6 +42,9 @@ def main(args: tuple[str, ...]) -> None:
     if args[0] == "monitor":
         _monitor(args[1:])
         return
+    if args[0] == "universe":
+        _universe(args[1:])
+        return
     _run_request(" ".join(args), forced_skills)
 
 
@@ -236,7 +239,7 @@ def _echo_monitor_table(results: list[dict]) -> None:
 
 def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:
     if not args:
-        raise click.UsageError("factor requires a subcommand: save/list/show/use")
+        raise click.UsageError("factor requires a subcommand: save/list/show/use/track/retire")
     command = args[0]
     store = FactorStore(DEFAULT_FACTORS_DIR)
     if command == "save":
@@ -278,7 +281,84 @@ def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:
         result = Coordinator().run_from_factor(name, params, request, skill_names=forced_skills, factor_store=store)
         _echo_run_result(result)
         return
+    if command == "track":
+        _factor_track(args[1:], store)
+        return
+    if command == "retire":
+        if len(args) < 2:
+            raise click.UsageError("factor retire requires name")
+        reason = _option_value(args[2:], "--reason")
+        if not reason:
+            raise click.UsageError("factor retire requires --reason")
+        updated = store.transition_lifecycle(args[1], "retired", reason)
+        click.echo(f"Retired {updated.name} ({reason})")
+        return
     raise click.UsageError(f"unknown factor subcommand: {command}")
+
+
+def _factor_track(args: tuple[str, ...], store: FactorStore) -> None:
+    from quantbench.factors.paper_tracking import run_paper_tracking_pass
+
+    if "--watch" in args:
+        import time
+
+        from quantbench.config import MONITOR_POLL_INTERVAL_SECONDS
+
+        interval_value = _option_value(args, "--interval")
+        interval = float(interval_value) if interval_value is not None else MONITOR_POLL_INTERVAL_SECONDS
+        click.echo(f"Paper-tracking every {interval:.0f}s. Ctrl+C to stop.")
+        try:
+            while True:
+                results = run_paper_tracking_pass(store=store)
+                _echo_paper_tracking_table(results)
+                click.echo(f"--- tracked {len(results)} factor(s), sleeping {interval:.0f}s ---")
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            click.echo("Stopped.")
+        return
+
+    results = run_paper_tracking_pass(store=store)
+    if "--json-output" in args:
+        click.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        return
+    _echo_paper_tracking_table(results)
+
+
+def _echo_paper_tracking_table(results: list[dict]) -> None:
+    headers = ["name", "lifecycle_state", "status", "days_tracked", "recent_sharpe"]
+    click.echo(" | ".join(headers))
+    click.echo(" | ".join("---" for _ in headers))
+    for item in results:
+        status = item.get("status") or ("error" if "error" in item else "")
+        click.echo(
+            " | ".join(
+                [
+                    str(item.get("name", "")),
+                    str(item.get("lifecycle_state", "")),
+                    str(item.get("error") or status),
+                    str(item.get("days_tracked", "")),
+                    _fmt(item.get("recent_sharpe")),
+                ]
+            )
+        )
+
+
+def _universe(args: tuple[str, ...]) -> None:
+    if not args:
+        raise click.UsageError("universe requires a subcommand: snapshot-crypto")
+    if args[0] != "snapshot-crypto":
+        raise click.UsageError(f"unknown universe subcommand: {args[0]}")
+    from datetime import datetime, timezone
+
+    from quantbench.data.warehouse import get_connection, record_crypto_universe_snapshot
+
+    quote = _option_value(args[1:], "--quote") or "USDT"
+    limit_value = _option_value(args[1:], "--limit")
+    limit = int(limit_value) if limit_value is not None else 30
+    as_of_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    written = record_crypto_universe_snapshot(get_connection(), as_of_date, quote=quote, limit=limit)
+    click.echo(f"Snapshotted {written} {quote} perpetual symbol(s) for {as_of_date}.")
 
 
 def _skill(args: tuple[str, ...]) -> None:
@@ -410,7 +490,7 @@ def _echo_compare_table(table: dict) -> None:
 
 
 def _echo_factor_table(rows) -> None:
-    headers = ["name", "family", "asset", "source_verdict", "source_sharpe", "param_summary", "saved_at"]
+    headers = ["name", "family", "asset", "lifecycle_state", "source_verdict", "source_sharpe", "param_summary", "saved_at"]
     click.echo(" | ".join(headers))
     click.echo(" | ".join("---" for _ in headers))
     for entry in rows:
@@ -421,6 +501,7 @@ def _echo_factor_table(rows) -> None:
                     entry.name,
                     entry.family,
                     entry.asset_class,
+                    entry.lifecycle_state,
                     str(entry.source_verdict or ""),
                     _fmt(entry.source_metrics.get("sharpe")),
                     params,
@@ -436,6 +517,7 @@ def _echo_factor_detail(entry) -> None:
     click.echo(f"asset_class: {entry.asset_class}")
     click.echo(f"source_run_id: {entry.source_run_id}")
     click.echo(f"source_verdict: {entry.source_verdict}")
+    click.echo(f"lifecycle_state: {entry.lifecycle_state}")
     click.echo(f"source_metrics: {json.dumps(entry.source_metrics, ensure_ascii=False, sort_keys=True)}")
     click.echo(f"parameters: {json.dumps(entry.parameters, ensure_ascii=False)}")
     click.echo(f"saved_from_rejected: {entry.saved_from_rejected}")

@@ -53,7 +53,7 @@
 **现状**：VISION Phase 1 验收标准写了"含退市合约"，但 CCXT provider（`ccxt_perpetual.py`）实际只能拉当前在市合约；退市合约的历史 OHLCV 没有获取路径。美股侧同理，yfinance 对已退市股票的数据不可靠。
 
 **缺什么**：
-- [ ] Crypto：评估退市永续合约历史数据来源（交易所归档 / Tardis / 自建快照积累）。最低成本方案：从现在开始每日快照当前 universe 与行情，随时间自然积累无偏差数据。
+- [x] Crypto 最低成本方案已落地：`quantbench universe snapshot-crypto` 每日快照当前 top-N 排名（[warehouse.py](quantbench/data/warehouse.py) 的 `record_crypto_universe_snapshot`），随时间自然积累无偏差数据。**未做**：交易所归档/Tardis 等回溯型历史数据源，以及用累积的快照重建 point-in-time universe（快照数据积累到一定量后的后续增量）。
 - [ ] Equity：评估含退市股票的数据源（见 1.3）。
 - [x] 在 universe 元数据中记录"本 universe 覆盖退市标的：是/否"，Reviewer 对"否"的 PIT 截面 run 输出结构性警告并影响 verdict 上限（例如封顶 PROMISING，不给 STRONG）。
 
@@ -251,10 +251,11 @@ Claude Science 背后有 eval 文化。QuantBench 的 Coordinator/Reviewer/Criti
 Phase 6 只有 "Live signal monitoring / 策略衰减预警" 两行字。**研究 → 纸面跟踪 → 衰减判定 → 退役**这个闭环是"研究平台"和"回测玩具"的分水岭。
 
 **缺什么**：
-- [ ] Paper tracking：对 verdict ≥ PROMISING 的因子，每日增量拉数据、计算信号、记录"如果按信号交易"的假想收益（无真实下单，符合产品边界）。
-- [ ] 衰减判定规则：live 期 IC/Sharpe 与回测期的统计对比（CUSUM 或滚动窗口检验），触发衰减警告。
-- [ ] 因子状态机：`research → paper_tracking → live_candidate → decayed → retired`，Factor Library 记录状态流转历史。
-- [ ] 这也是对 point-in-time 数据积累（1.2）的天然补充——每日快照即无偏差数据。
+- [x] Paper tracking：对 verdict ≥ PROMISING（`ALIVE_VERDICTS`）的因子，每日增量拉数据、计算信号、记录"如果按信号交易"的假想收益（[quantbench/factors/paper_tracking.py](quantbench/factors/paper_tracking.py)，复用 [monitor/pipeline.py](quantbench/monitor/pipeline.py) 的 `refresh_and_backtest`，无真实下单，符合产品边界）。
+- [x] 衰减判定规则：live 期 Sharpe 与回测期的比值判定（复用既有 [compute_decay_report](quantbench/monitor/decay.py) 双阈值,CUSUM 留后续增量），触发衰减警告并驱动状态转移。
+- [x] 因子状态机：`research → paper_tracking → live_candidate → decayed → retired`（[quantbench/factors/lifecycle.py](quantbench/factors/lifecycle.py) 纯函数 + [FactorStore.transition_lifecycle](quantbench/factors/store.py) 持久化 + 审计历史，`retired` 仅可由 `quantbench factor retire` 显式触发，不自动化）。
+- [x] Crypto 每日 universe 快照（[warehouse.py](quantbench/data/warehouse.py) 的 `record_crypto_universe_snapshot`/`query_crypto_universe_snapshot`，`quantbench universe snapshot-crypto`）——纯累积,为未来 crypto point-in-time 重建铺路,不改变当前 `build_crypto_perpetual_universe` 的既有行为。
+- 调度采用本地轮询循环（`quantbench factor track --watch`，同构于既有 `monitor watch`），未接 GitHub Actions cron——GH Actions 的 runner 无状态、每次全新 checkout，而 paper tracking 需要持续累积的本地数据（`data_cache/`、`factors/paper_tracking/`），不适合塞进临时 runner。
 
 ### 5.3 信号导出格式（研究 → 生产的交接面）（优先级：🟠 中低）
 

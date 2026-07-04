@@ -9,7 +9,7 @@ import duckdb
 import pandas as pd
 
 from quantbench.api import run_reader
-from quantbench.config import DEFAULT_COST_BPS, MONITOR_REFRESH_LOOKBACK_DAYS
+from quantbench.config import ALIVE_VERDICTS, DEFAULT_COST_BPS, MONITOR_REFRESH_LOOKBACK_DAYS
 from quantbench.data.refresh import refresh_symbol, refresh_universe
 from quantbench.data.warehouse import get_connection, query_universe_ohlcv
 from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backtest
@@ -18,8 +18,6 @@ from quantbench.factors.compute_extract import extract_compute_source
 from quantbench.monitor.decay import DecayReport, compute_decay_report
 from quantbench.portfolio.combine import combine
 from quantbench.skills.codeexec import run_signal_code, run_signal_code_panel
-
-ALIVE_VERDICTS = {"STRONG", "PROMISING"}
 
 # config.yaml does not persist the exact timeframe/n_groups/cost_bps a
 # cross-sectional or portfolio run used.
@@ -52,13 +50,17 @@ def _refresh_start_str(since_timestamp: Any) -> str:
     return start.strftime("%Y-%m-%d")
 
 
-def _refresh_and_backtest(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_start: str) -> pd.Series:
+def refresh_and_backtest(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_start: str) -> pd.Series:
     """Refreshes a single-symbol or cross-sectional run's data (from
     `refresh_start`, see _refresh_start_str, through today) and re-executes
     its own compute() over the merged (historical + fresh) series, returning
     the full net-return series (not sliced to "since creation" - callers
     decide the window). Raises if the run has no signal.py (e.g. a portfolio
     run) or is missing the config fields needed to know what to refresh.
+
+    Public (not prefixed with _) because it is the shared "refresh + recompute"
+    primitive for both decay monitoring (check_run_decay, below) and paper
+    tracking (quantbench/factors/paper_tracking.py).
     """
     config = run_reader.read_config(run_id) or {}
     run_dir = run_reader.run_dir_for(run_id)
@@ -139,7 +141,7 @@ def _check_portfolio_decay(
     skipped: list[str] = []
     for constituent_id in constituent_ids:
         try:
-            constituent_series[constituent_id] = _refresh_and_backtest(constituent_id, conn, refresh_start)
+            constituent_series[constituent_id] = refresh_and_backtest(constituent_id, conn, refresh_start)
         except Exception:
             # One constituent failing to refresh (e.g. it was itself deleted,
             # or is a nested portfolio run) shouldn't block the whole
@@ -214,7 +216,7 @@ def check_run_decay(run_id: str, conn: duckdb.DuckDBPyConnection | None = None) 
                     return {"error": f"run {run_id} has no backtest_result.json returns"}
                 since_timestamp = original_returns.index.max()
                 original_sharpe = float((manifest.get("metrics") or {}).get("sharpe", 0.0))
-                full_returns = _refresh_and_backtest(run_id, conn, _refresh_start_str(since_timestamp))
+                full_returns = refresh_and_backtest(run_id, conn, _refresh_start_str(since_timestamp))
                 recent = full_returns[full_returns.index > since_timestamp]
                 report = compute_decay_report(original_sharpe, recent, since_timestamp)
         except Exception as exc:

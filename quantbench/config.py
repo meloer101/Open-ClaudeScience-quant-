@@ -43,6 +43,19 @@ MONITOR_MIN_OBSERVATIONS = 5
 MONITOR_SHARPE_ALERT_RATIO = 0.5
 MONITOR_SHARPE_WATCH_RATIO = 0.8
 MONITOR_POLL_INTERVAL_SECONDS = 6 * 3600
+# Verdicts worth continuing to watch after a run finishes - shared by decay
+# monitoring (quantbench/monitor/pipeline.py) and the factor lifecycle's
+# initial-state assignment (quantbench/factors/lifecycle.py), so "alive
+# enough to keep checking" means the same thing in both places.
+ALIVE_VERDICTS = {"STRONG", "PROMISING"}
+
+# Alpha lifecycle / paper tracking (GAP 5.2): promotion from paper_tracking to
+# live_candidate requires both enough elapsed days AND enough consecutive
+# non-decayed checks - a single lucky day should not promote a factor, same
+# "single occurrence doesn't count, repetition does" philosophy as the memory
+# consolidation promotion gate (quantbench/memory/consolidation.py).
+PAPER_TRACKING_PROMOTION_MIN_DAYS = 20
+PAPER_TRACKING_PROMOTION_MIN_CONSECUTIVE_OK = 3
 
 # Signal-code execution sandbox (GAP 4.5 / PHASE13 1.1): conservative defaults for
 # a research-scale single-asset backtest call, not a batch job. Callers that need

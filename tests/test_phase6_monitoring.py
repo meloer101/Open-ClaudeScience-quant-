@@ -328,7 +328,7 @@ def test_refresh_and_backtest_cross_sectional_goes_through_sandbox(tmp_path, mon
     monkeypatch.setattr(pipeline_mod, "query_universe_ohlcv", lambda *a, **k: panel)
 
     good_id = _build_cross_sectional_run(tmp_path, "def compute(df):\n    return df['close'].pct_change(5).fillna(0.0)\n")
-    returns = pipeline_mod._refresh_and_backtest(good_id, conn=None, refresh_start="2023-01-01")
+    returns = pipeline_mod.refresh_and_backtest(good_id, conn=None, refresh_start="2023-01-01")
     assert isinstance(returns, pd.Series)
     assert len(returns) > 0
 
@@ -351,7 +351,7 @@ def test_refresh_and_backtest_cross_sectional_isolates_infinite_loop(tmp_path, m
 
     loop_id = _build_cross_sectional_run(tmp_path, "def compute(df):\n    while True:\n        pass\n")
     with pytest.raises(SandboxError):
-        pipeline_mod._refresh_and_backtest(loop_id, conn=None, refresh_start="2023-01-01")
+        pipeline_mod.refresh_and_backtest(loop_id, conn=None, refresh_start="2023-01-01")
 
 
 # ---------------------------------------------------------------------------

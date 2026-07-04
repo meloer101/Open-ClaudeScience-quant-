@@ -14,6 +14,7 @@ from quantbench.data.universe import UniverseDefinition
 
 OHLCV_TABLE = "ohlcv"
 FUNDING_TABLE = "funding_rates"
+CRYPTO_UNIVERSE_SNAPSHOT_TABLE = "crypto_universe_snapshot"
 
 
 def get_connection(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
@@ -50,6 +51,17 @@ def ensure_schema(conn: duckdb.DuckDBPyConnection) -> None:
             provider VARCHAR,
             source VARCHAR,
             PRIMARY KEY (symbol, timestamp)
+        )
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {CRYPTO_UNIVERSE_SNAPSHOT_TABLE} (
+            as_of_date DATE NOT NULL,
+            symbol VARCHAR NOT NULL,
+            quote_volume_24h DOUBLE,
+            rank INTEGER,
+            PRIMARY KEY (as_of_date, symbol)
         )
         """
     )
@@ -158,6 +170,60 @@ def query_universe_funding_rates(
     start_ts = pd.Timestamp(start, tz="UTC")
     end_ts = pd.Timestamp(end, tz="UTC")
     return conn.execute(query, [symbols, start_ts, end_ts]).fetchdf()
+
+
+def record_crypto_universe_snapshot(
+    conn: duckdb.DuckDBPyConnection,
+    as_of_date: str,
+    *,
+    quote: str = "USDT",
+    limit: int = 30,
+) -> int:
+    """Snapshots today's actual top-N perpetual swaps by 24h volume into
+    CRYPTO_UNIVERSE_SNAPSHOT_TABLE (GAP 1.2: accumulate real historical
+    rankings going forward, since none exist for the past). Purely additive -
+    does not change build_crypto_perpetual_universe's existing "use today's
+    ranking" behavior; that stays a documented, explicitly-flagged
+    non-point-in-time universe until enough snapshots have accrued to
+    reconstruct history from. Idempotent: re-snapshotting the same date
+    replaces rather than duplicates rows."""
+    from quantbench.data.providers.ccxt_perpetual import fetch_top_symbols_by_volume
+
+    ensure_schema(conn)
+    rows = fetch_top_symbols_by_volume(quote=quote, limit=limit)
+    if not rows:
+        return 0
+
+    frame = pd.DataFrame(rows)
+    frame.insert(0, "as_of_date", pd.Timestamp(as_of_date).date())
+    frame["rank"] = range(1, len(frame) + 1)
+
+    conn.register("_incoming_universe_snapshot", frame)
+    try:
+        conn.execute(
+            f"""
+            INSERT OR REPLACE INTO {CRYPTO_UNIVERSE_SNAPSHOT_TABLE}
+            SELECT as_of_date, symbol, quote_volume_24h, rank
+            FROM _incoming_universe_snapshot
+            """
+        )
+    finally:
+        conn.unregister("_incoming_universe_snapshot")
+    return len(frame)
+
+
+def query_crypto_universe_snapshot(conn: duckdb.DuckDBPyConnection, as_of_date: str) -> list[str] | None:
+    """Returns the snapshotted top-N symbol list (ordered by rank) for
+    as_of_date, or None if that date was never snapshotted."""
+    ensure_schema(conn)
+    query = f"""
+        SELECT symbol
+        FROM {CRYPTO_UNIVERSE_SNAPSHOT_TABLE}
+        WHERE as_of_date = ?
+        ORDER BY rank
+    """
+    rows = conn.execute(query, [pd.Timestamp(as_of_date).date()]).fetchall()
+    return [row[0] for row in rows] if rows else None
 
 
 def fetch_universe_ohlcv(

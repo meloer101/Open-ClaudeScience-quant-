@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from quantbench.config import FACTORS_DIR
 from quantbench.factors.entry import FactorEntry
+from quantbench.factors.lifecycle import validate_transition
 
 
 VERDICT_ORDER = {"REJECTED": 0, "WEAK": 1, "PROMISING": 2, "STRONG": 3}
@@ -37,6 +40,7 @@ class FactorStore:
         family: str | None = None,
         asset_class: str | None = None,
         min_verdict: str | None = None,
+        lifecycle_state: str | list[str] | None = None,
     ) -> list[FactorEntry]:
         entries = self._load_all()
         if family:
@@ -50,7 +54,32 @@ class FactorStore:
                 for entry in entries
                 if entry.source_verdict is not None and VERDICT_ORDER.get(entry.source_verdict, -1) >= min_rank
             ]
+        if lifecycle_state:
+            allowed = {lifecycle_state} if isinstance(lifecycle_state, str) else set(lifecycle_state)
+            entries = [entry for entry in entries if entry.lifecycle_state in allowed]
         return sorted(entries, key=lambda entry: (entry.saved_at, entry.name), reverse=True)
+
+    def transition_lifecycle(self, name: str, to_state: str, reason: str) -> FactorEntry:
+        """Validates and applies a lifecycle transition, appending an audit
+        entry (mirrors quantbench.memory.store.UserMemoryStore.update()'s
+        "read, dataclasses.replace, rewrite" pattern for frozen dataclasses).
+        Raises ValueError via validate_transition if the transition is not in
+        lifecycle.ALLOWED_TRANSITIONS - e.g. resurrecting a retired factor."""
+        entry = self.load_factor(name)
+        validate_transition(entry.lifecycle_state, to_state)
+        history_entry = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "from_state": entry.lifecycle_state,
+            "to_state": to_state,
+            "reason": reason,
+        }
+        updated = dataclasses.replace(
+            entry,
+            lifecycle_state=to_state,
+            lifecycle_history=[*entry.lifecycle_history, history_entry],
+        )
+        self.save_factor(updated, overwrite=True)
+        return updated
 
     def delete_factor(self, name: str) -> None:
         self._entry_path(name).unlink()
@@ -91,4 +120,5 @@ def _index_row(entry: FactorEntry) -> dict:
         "param_summary": ", ".join(f"{param['name']}={param['value']:g}" for param in entry.parameters),
         "saved_from_rejected": entry.saved_from_rejected,
         "saved_at": entry.saved_at,
+        "lifecycle_state": entry.lifecycle_state,
     }

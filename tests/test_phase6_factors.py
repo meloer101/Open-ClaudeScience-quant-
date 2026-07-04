@@ -143,6 +143,52 @@ def test_factor_cli_save_list_show_uses_factor_store(patched_runs, tmp_path, mon
     assert "momentum_20d" in listed.output
     assert "source_verdict: PROMISING" in shown.output
     assert "sensitive to lookback" in shown.output
+    assert "lifecycle_state: paper_tracking" in shown.output
+    assert "paper_tracking" in listed.output
+
+
+def test_factor_cli_track_and_retire(patched_runs, tmp_path, monkeypatch):
+    from quantbench.cli import main
+
+    _write_run(patched_runs, "run_promising")
+    monkeypatch.setattr("quantbench.cli.DEFAULT_FACTORS_DIR", tmp_path / "factors")
+    monkeypatch.setattr(
+        "quantbench.factors.paper_tracking.refresh_and_backtest",
+        lambda run_id, conn, refresh_start: __import__("pandas").Series(dtype="float64"),
+    )
+
+    runner = CliRunner()
+    saved = runner.invoke(main, ["factor", "save", "run_promising", "--name", "momentum_20d"])
+    assert saved.exit_code == 0, saved.output
+
+    tracked = runner.invoke(main, ["factor", "track"])
+    assert tracked.exit_code == 0, tracked.output
+    assert "momentum_20d" in tracked.output
+
+    retired = runner.invoke(main, ["factor", "retire", "momentum_20d", "--reason", "superseded by v2"])
+    assert retired.exit_code == 0, retired.output
+    assert "Retired momentum_20d" in retired.output
+
+    shown = runner.invoke(main, ["factor", "show", "momentum_20d"])
+    assert "lifecycle_state: retired" in shown.output
+
+    retired_again = runner.invoke(main, ["factor", "retire", "momentum_20d", "--reason", "twice"])
+    assert retired_again.exit_code != 0
+
+
+def test_universe_cli_snapshot_crypto(tmp_path, monkeypatch):
+    from quantbench.cli import main
+
+    monkeypatch.setattr("quantbench.data.warehouse.DATA_CACHE_DIR", tmp_path / "data_cache")
+    monkeypatch.setattr(
+        "quantbench.data.providers.ccxt_perpetual.fetch_top_symbols_by_volume",
+        lambda quote="USDT", limit=30: [{"symbol": "BTC/USDT", "quote_volume_24h": 1.0}],
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["universe", "snapshot-crypto"])
+    assert result.exit_code == 0, result.output
+    assert "Snapshotted 1 USDT perpetual symbol(s)" in result.output
 
 
 def test_run_from_factor_applies_param_override_and_records_lineage(patched_runs, tmp_path):

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from quantbench.api import run_reader
 from quantbench.factors.compute_extract import extract_compute_source
+from quantbench.factors.lifecycle import initial_state_for_verdict
 from quantbench.factors.parametrize import extract_parameters
 from quantbench.library.record import build_record
 
@@ -29,6 +30,12 @@ class FactorEntry:
     saved_from_rejected: bool
     saved_at: str
     notes: str = ""
+    # GAP 5.2 lifecycle: defaults keep old factor JSON files (saved before
+    # this field existed) loadable without migration - from_dict below reads
+    # them with .get(...) fallbacks, same pattern as every other optional
+    # field on this dataclass.
+    lifecycle_state: str = "research"
+    lifecycle_history: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -48,6 +55,8 @@ class FactorEntry:
             saved_from_rejected=bool(payload.get("saved_from_rejected")),
             saved_at=str(payload.get("saved_at") or ""),
             notes=str(payload.get("notes") or ""),
+            lifecycle_state=str(payload.get("lifecycle_state") or "research"),
+            lifecycle_history=list(payload.get("lifecycle_history") or []),
         )
 
 
@@ -65,6 +74,8 @@ def build_entry_from_run(run_id: str, name: str, *, force: bool = False, notes: 
 
     record = build_record(run_id)
     code = extract_compute_source(signal_path.read_text(encoding="utf-8"))
+    saved_at = datetime.now(timezone.utc).isoformat()
+    lifecycle_state = initial_state_for_verdict(verdict)
     return FactorEntry(
         name=name,
         family=record.factor_family,
@@ -80,8 +91,17 @@ def build_entry_from_run(run_id: str, name: str, *, force: bool = False, notes: 
             if str(finding.get("severity", "")).lower() in {"critical", "warning"}
         ],
         saved_from_rejected=verdict == "REJECTED",
-        saved_at=datetime.now(timezone.utc).isoformat(),
+        saved_at=saved_at,
         notes=notes,
+        lifecycle_state=lifecycle_state,
+        lifecycle_history=[
+            {
+                "at": saved_at,
+                "from_state": None,
+                "to_state": lifecycle_state,
+                "reason": f"created from run {run_id} (verdict={verdict})",
+            }
+        ],
     )
 
 
