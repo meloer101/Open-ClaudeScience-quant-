@@ -73,10 +73,33 @@ manifest.json
 
 ## 快速开始
 
+### 支持平台
+
+首发构建支持 macOS 和 Linux，要求 Python 3.11+。Windows/WSL 以外的原生 Windows 环境尚未纳入首发验证范围。
+
+QuantBench 的运行时状态默认写入 `~/.quantbench/`：
+
+```text
+~/.quantbench/
+  data_cache/
+  runs/
+  factors/
+  literature/
+  api_token
+```
+
+如需把状态目录放到别处，设置 `QUANTBENCH_HOME=/path/to/quantbench-home`。
+
 安装 Python 依赖：
 
 ```bash
 uv sync
+```
+
+也可以从 wheel 或可编辑安装后使用控制台命令：
+
+```bash
+uv run quantbench --help
 ```
 
 运行 CLI：
@@ -120,6 +143,8 @@ uv run uvicorn quantbench.api.server:app --reload --reload-dir quantbench
 Uvicorn watches the whole project tree; generated run artifacts such as
 `runs/<run_id>/signal.py` can trigger a backend reload mid-run and cancel the
 in-flight task.
+
+本地 API 是单用户开发服务。设置 `QUANTBENCH_API_TOKEN` 或使用 `~/.quantbench/api_token` 后，API 会要求请求携带 `X-QuantBench-Token`；SSE 事件流也支持 `?token=` 查询参数，因为浏览器 `EventSource` 不能发送自定义 header。
 
 启动 Web 工作台：
 

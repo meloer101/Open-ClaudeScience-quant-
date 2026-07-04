@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
@@ -35,12 +35,15 @@ from quantbench.library.aggregate import summarize
 from quantbench.library.compare import compare_runs, compute_returns_correlation
 from quantbench.library.index import ExperimentIndex, parse_csv_set
 from quantbench.library.lineage import lineage
+from quantbench.api.security import require_local_api_token
+from quantbench.platform import assert_supported_platform
 
 _manager = RunManager()
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    assert_supported_platform()
     yield
     # Without this, Ctrl-C/reload leaves ThreadPoolExecutor worker threads
     # mid-LLM-call; the process can't exit until they finish (up to
@@ -53,14 +56,14 @@ async def _lifespan(app: FastAPI):
     _self._manager.cancel_all()
 
 
-app = FastAPI(title="QuantBench API", lifespan=_lifespan)
+app = FastAPI(title="QuantBench API", lifespan=_lifespan, dependencies=[Depends(require_local_api_token)])
 
 # Local single-user tool; the frontend dev server runs on a different port.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "X-QuantBench-Token"],
 )
 
 
@@ -278,10 +281,15 @@ def get_backtest_result(run_id: str):
 
 @app.get("/api/runs/{run_id}/artifacts/{filename}")
 def get_artifact(run_id: str, filename: str):
-    if ".." in filename:
+    if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="invalid filename")
 
-    path = run_reader.run_dir_for(run_id) / filename
+    run_dir = run_reader.run_dir_for(run_id).resolve()
+    path = (run_dir / filename).resolve()
+    try:
+        path.relative_to(run_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid filename") from None
     if not path.is_file():
         raise HTTPException(status_code=404, detail="artifact not found")
 
@@ -295,7 +303,7 @@ def get_artifact(run_id: str, filename: str):
 
 @app.get("/api/runs/{run_id}/artifacts/{filename}/preview")
 def get_artifact_preview(run_id: str, filename: str):
-    if ".." in filename:
+    if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="invalid filename")
     if not filename.endswith(".parquet"):
         raise HTTPException(status_code=400, detail="preview is only supported for .parquet artifacts")

@@ -16,10 +16,16 @@ import type {
   RunSummary,
 } from "../types";
 
+const API_BASE = import.meta.env.VITE_QUANTBENCH_API_BASE ?? "/api";
+const API_TOKEN = import.meta.env.VITE_QUANTBENCH_API_TOKEN ?? "";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    headers: { "Content-Type": "application/json" },
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (API_TOKEN) headers.set("X-QuantBench-Token", API_TOKEN);
+  const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    headers,
   });
   if (!response.ok) {
     const body = await response.text();
@@ -147,15 +153,17 @@ export function reproducePaper(
 }
 
 export function artifactUrl(runId: string, filename: string): string {
-  return `/api/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(filename)}`;
+  return `${API_BASE}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(filename)}`;
 }
 
 export function runEventsUrl(runId: string): string {
-  return `/api/runs/${encodeURIComponent(runId)}/events`;
+  const path = `${API_BASE}/runs/${encodeURIComponent(runId)}/events`;
+  return API_TOKEN ? `${path}?token=${encodeURIComponent(API_TOKEN)}` : path;
 }
 
 async function fetchArtifactJson<T>(runId: string, filename: string): Promise<T | null> {
-  const response = await fetch(artifactUrl(runId, filename));
+  const headers = API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined;
+  const response = await fetch(artifactUrl(runId, filename), { headers });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<T>;
@@ -166,7 +174,8 @@ export async function getBacktestResult(runId: string): Promise<BacktestResultPa
   // runs wrote a different filename before it was unified with the
   // single-symbol path (see run_reader.read_backtest_result on the backend).
   // This endpoint resolves either name so the frontend never has to guess.
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/backtest-result`);
+  const headers = API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined;
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/backtest-result`, { headers });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<BacktestResultPayload>;
@@ -177,7 +186,8 @@ export function getReviewReport(runId: string): Promise<ReviewReportPayload | nu
 }
 
 export async function getPortfolioSummary(runId: string): Promise<PortfolioSummary | null> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/portfolio`);
+  const headers = API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined;
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/portfolio`, { headers });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<PortfolioSummary>;
@@ -188,7 +198,8 @@ export function previewParquet(runId: string, filename: string): Promise<Parquet
 }
 
 export async function getMonitoringReport(runId: string): Promise<MonitoringReport | null> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/monitoring`);
+  const headers = API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined;
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/monitoring`, { headers });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<MonitoringReport>;
