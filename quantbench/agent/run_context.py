@@ -64,3 +64,4 @@ class _RunContext:
         self.staging_confirm = None
         self.memory_default_facts: list[Any] = []
         self.applied_memory_defaults: list[dict[str, Any]] = []
+        self.memory_events: list[dict[str, Any]] = []

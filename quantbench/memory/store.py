@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from dataclasses import dataclass
@@ -101,6 +102,18 @@ class UserMemoryStore:
             content += "\n"
         (self.memory_dir / "INDEX.md").write_text(content, encoding="utf-8")
         return content
+
+    def append_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        payload = {"when": _utc_now(), **event}
+        with (self.memory_dir / "memory_events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        return payload
+
+    def read_events(self) -> list[dict[str, Any]]:
+        path = self.memory_dir / "memory_events.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def _find_conflicting_default(self, fact: dict[str, Any]) -> UserMemoryFact | None:
         if fact.get("type") not in {"default_preference", "default"}:

@@ -222,6 +222,7 @@ export type RunEvent =
   | { type: "tool_start"; tool: string; args: Record<string, unknown> }
   | { type: "tool_end"; tool: string; result: unknown }
   | { type: "staging"; artifact: StagingArtifact; config: Record<string, unknown> }
+  | { type: "memory"; message: string; events: Record<string, unknown>[] }
   | { type: "final"; summary: string }
   | { type: "cancelled" }
   | { type: "error"; message: string };

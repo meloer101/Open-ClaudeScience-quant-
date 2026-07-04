@@ -951,6 +951,7 @@ class Coordinator:
             session_id=session_id,
             turn_index=turn_index,
             applied_memory_defaults=ctx.applied_memory_defaults,
+            memory_events=ctx.memory_events,
         )
         if mcp_manager is not None:
             mcp_manager.close()
@@ -1033,6 +1034,7 @@ class Coordinator:
             session_id=session_id,
             turn_index=turn_index,
             applied_memory_defaults=[],
+            memory_events=[],
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics={}, warnings=[], summary=summary)
 
@@ -1139,6 +1141,7 @@ class Coordinator:
             delegations=ctx.delegations,
             sandbox_usage=[asdict(item) for item in ctx.sandbox_usage],
             mcp_calls=ctx.mcp_calls,
+            memory_events=[],
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics=metrics, warnings=ctx.warnings, summary=summary)
 

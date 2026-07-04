@@ -25,6 +25,8 @@ from quantbench.agent.coordinator import Coordinator, RunCancelled
 from quantbench.api.session import SessionStore, summarize_run
 from quantbench.artifact.store import ArtifactStore
 from quantbench.config import RUNS_DIR
+from quantbench.memory.consolidation import consolidate_session
+from quantbench.memory.store import UserMemoryStore
 
 # Sentinel pushed after the terminal event so event_stream() knows to stop
 # without needing a separate "is this run still active" check.
@@ -35,6 +37,7 @@ class RunManager:
     def __init__(self, run_store: ArtifactStore | None = None, max_workers: int = 2):
         self._store = run_store or ArtifactStore(RUNS_DIR)
         self._session_store = SessionStore(self._store.runs_dir)
+        self._memory_store = UserMemoryStore()
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._queues: dict[str, queue.Queue] = {}
         self._cancel_events: dict[str, threading.Event] = {}
@@ -65,8 +68,6 @@ class RunManager:
 
         def on_event(event: dict[str, Any]) -> None:
             event_queue.put(event)
-            if event.get("type") == "final":
-                event_queue.put(_STREAM_END)
 
         def work(cancel_event: threading.Event) -> None:
             def staging_confirm(run_id: str, artifact: dict[str, Any], config: dict[str, Any]) -> dict[str, Any] | None:
@@ -110,6 +111,19 @@ class RunManager:
                 turn_index=turn_index,
             )
             self._session_store.update_turn_summary(session_id, turn_index, summarize_run(run.run_id))
+            try:
+                consolidation = consolidate_session(
+                    self._session_store.get(session_id),
+                    memory_store=self._memory_store,
+                    llm=coordinator.llm,
+                )
+            except Exception:
+                consolidation = None
+            if consolidation is not None:
+                self._append_run_audit(run.run_id, consolidation.memory_events, consolidation.delegations)
+                for message in consolidation.visible_messages:
+                    event_queue.put({"type": "memory", "message": message, "events": consolidation.memory_events})
+            event_queue.put(_STREAM_END)
 
         self._executor.submit(self._run_task, run, event_queue, work)
         return run.run_id
@@ -185,6 +199,17 @@ class RunManager:
         finally:
             with self._lock:
                 self._staging_waiters.pop(run_id, None)
+
+    def _append_run_audit(self, run_id: str, memory_events: list[dict[str, Any]], delegations: list[dict[str, Any]]) -> None:
+        manifest_path = self._store.runs_dir / run_id / "manifest.json"
+        if not manifest_path.exists():
+            return
+        import json
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["memory_events"] = [*(manifest.get("memory_events") or []), *memory_events]
+        manifest["delegations"] = [*(manifest.get("delegations") or []), *delegations]
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def has_live_stream(self, run_id: str) -> bool:
         return run_id in self._queues

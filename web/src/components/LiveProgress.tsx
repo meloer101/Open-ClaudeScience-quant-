@@ -38,6 +38,9 @@ function StepLine({ event, pending }: { event: RunEvent; pending: boolean }) {
       </div>
     );
   }
+  if (event.type === "memory") {
+    return <div className="text-sm text-warm-700 pl-3.5">{event.message}</div>;
+  }
   return null;
 }
 
@@ -70,7 +73,7 @@ export function LiveProgress({ events }: LiveProgressProps) {
   return (
     <div className="space-y-1.5 border border-warm-100 rounded-xl p-3 bg-warm-25">
       {events.map((event, index) =>
-        event.type === "tool_start" || event.type === "tool_end" ? (
+        event.type === "tool_start" || event.type === "tool_end" || event.type === "memory" ? (
           <StepLine key={index} event={event} pending={startIndexByTool.get(index) ?? false} />
         ) : null,
       )}
