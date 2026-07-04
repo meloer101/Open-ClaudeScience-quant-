@@ -83,6 +83,8 @@ class Run:
         sandbox_usage: list[dict[str, Any]] | None = None,
         mcp_calls: list[dict[str, Any]] | None = None,
         staging: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        turn_index: int | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -107,6 +109,8 @@ class Run:
             "sandbox_usage": sandbox_usage or [],
             "mcp_calls": mcp_calls or [],
             "staging": staging,
+            "session_id": session_id,
+            "turn_index": turn_index,
         }
         return self.save_json("manifest.json", manifest)
 

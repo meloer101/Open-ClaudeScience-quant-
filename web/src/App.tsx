@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listRuns, createRun, getRun, listLibrary, cancelRun, confirmStaging } from "./api/client";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  listRuns,
+  getRun,
+  listLibrary,
+  cancelRun,
+  confirmStaging,
+  createSession,
+  createSessionTurn,
+  getSession,
+} from "./api/client";
 import { useRunEvents } from "./hooks/useRunEvents";
 import { Sidebar } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
@@ -24,6 +33,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function artifactKey(runId: string, filename: string): string {
   return `${runId}::${filename}`;
+}
+
+function isSessionId(id: string | null): boolean {
+  return Boolean(id?.startsWith("session_"));
 }
 
 // The Interactive Charts tab isn't backed by a real file (see types.ts
@@ -83,20 +96,52 @@ function App() {
   }, [runs, openTabs.length]);
 
   const isDraftActive = activeTabId === DRAFT_ID;
-  const activeRunId = isDraftActive ? null : activeTabId;
+  const activeSessionId = isSessionId(activeTabId) ? activeTabId : null;
+  const activeLegacyRunId = !isDraftActive && !activeSessionId ? activeTabId : null;
 
   const { data: currentRun, isLoading: isRunLoading } = useQuery({
-    queryKey: ["run", activeRunId],
-    queryFn: () => getRun(activeRunId!),
-    enabled: Boolean(activeRunId),
+    queryKey: ["run", activeLegacyRunId],
+    queryFn: () => getRun(activeLegacyRunId!),
+    enabled: Boolean(activeLegacyRunId),
     refetchInterval: (query) => (query.state.data?.status === "running" || query.state.data?.status === "awaiting_confirmation" ? 1000 : false),
   });
 
-  const liveEvents = useRunEvents(activeRunId, currentRun?.status === "running" || currentRun?.status === "awaiting_confirmation");
+  const { data: currentSession, isLoading: isSessionLoading } = useQuery({
+    queryKey: ["session", activeSessionId],
+    queryFn: () => getSession(activeSessionId!),
+    enabled: Boolean(activeSessionId),
+    refetchInterval: 1000,
+  });
+
+  const sessionRunIds = currentSession?.turns.map((turn) => turn.run_id).filter((runId): runId is string => Boolean(runId)) ?? [];
+  const sessionRunQueries = useQueries({
+    queries: sessionRunIds.map((runId) => ({
+      queryKey: ["run", runId],
+      queryFn: () => getRun(runId),
+      refetchInterval: (query: { state: { data?: { status?: string } } }) =>
+        query.state.data?.status === "running" || query.state.data?.status === "awaiting_confirmation" ? 1000 : false,
+    })),
+  });
+  const sessionRuns = sessionRunQueries.map((query) => query.data).filter((run): run is NonNullable<typeof run> => Boolean(run));
+  const liveSessionRun = [...sessionRuns]
+    .reverse()
+    .find((run) => run.status === "running" || run.status === "awaiting_confirmation");
+  const liveRunId = liveSessionRun?.run_id ?? (currentRun?.status === "running" || currentRun?.status === "awaiting_confirmation" ? currentRun.run_id : null);
+  const liveEvents = useRunEvents(liveRunId, Boolean(liveRunId));
 
   const sessionTabs: SessionTab[] = openTabs.map((id) => {
     if (id === DRAFT_ID) {
       return { id, label: "New session", status: "draft" };
+    }
+    if (id.startsWith("session_")) {
+      const session = currentSession?.session_id === id ? currentSession : null;
+      const firstRunId = session?.turns[0]?.run_id;
+      const firstRun = firstRunId ? runs.find((run) => run.run_id === firstRunId) : null;
+      return {
+        id,
+        label: firstRun?.user_request || "Session",
+        status: liveSessionRun ? liveSessionRun.status : "completed",
+      };
     }
     const summary = runs.find((run) => run.run_id === id);
     return {
@@ -140,18 +185,20 @@ function App() {
     });
   };
 
-  const handleSelectArtifact = (filename: string) => {
-    if (!activeRunId || !currentRun) return;
-    const artifact = currentRun.artifacts.find((item) => item.filename === filename);
+  const runDetailById = new Map([...(currentRun ? [currentRun] : []), ...sessionRuns].map((run) => [run.run_id, run]));
+
+  const handleSelectArtifact = (runId: string, filename: string) => {
+    const run = runDetailById.get(runId);
+    if (!run) return;
+    const artifact = run.artifacts.find((item) => item.filename === filename);
     if (!artifact) return;
-    const key = artifactKey(activeRunId, filename);
-    setOpenArtifactTabs((prev) => (prev.some((tab) => tab.key === key) ? prev : [...prev, { key, runId: activeRunId, artifact }]));
+    const key = artifactKey(runId, filename);
+    setOpenArtifactTabs((prev) => (prev.some((tab) => tab.key === key) ? prev : [...prev, { key, runId, artifact }]));
     setActiveArtifactKey(key);
   };
 
-  const handleOpenCharts = () => {
-    if (!activeRunId) return;
-    const key = artifactKey(activeRunId, CHARTS_FILENAME);
+  const handleOpenCharts = (runId: string) => {
+    const key = artifactKey(runId, CHARTS_FILENAME);
     setOpenArtifactTabs((prev) =>
       prev.some((tab) => tab.key === key)
         ? prev
@@ -159,7 +206,7 @@ function App() {
             ...prev,
             {
               key,
-              runId: activeRunId,
+              runId,
               artifact: { filename: CHARTS_FILENAME, kind: "chart-dashboard", size_bytes: 0 },
             },
           ],
@@ -180,30 +227,39 @@ function App() {
   };
 
   const handleSubmit = async (request: string) => {
-    const { run_id } = await createRun(request);
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      const session = await createSession();
+      sessionId = session.session_id;
+    }
+    await createSessionTurn(sessionId, request);
     setOpenTabs((prev) => {
-      if (activeTabId && prev.includes(activeTabId) && (activeTabId === DRAFT_ID || activeTabId === run_id)) {
-        return prev.map((id) => (id === activeTabId ? run_id : id));
+      if (activeTabId && prev.includes(activeTabId) && activeTabId === DRAFT_ID) {
+        return prev.map((id) => (id === activeTabId ? sessionId : id));
       }
-      return [...prev, run_id];
+      if (prev.includes(sessionId)) {
+        return prev;
+      }
+      return [...prev, sessionId];
     });
-    setActiveTabId(run_id);
+    setActiveTabId(sessionId);
+    await queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
     await queryClient.invalidateQueries({ queryKey: ["runs"] });
     await queryClient.invalidateQueries({ queryKey: ["library"] });
   };
 
   const handleStop = async () => {
-    if (!activeRunId) return;
-    await cancelRun(activeRunId);
-    await queryClient.invalidateQueries({ queryKey: ["run", activeRunId] });
+    if (!liveRunId) return;
+    await cancelRun(liveRunId);
+    await queryClient.invalidateQueries({ queryKey: ["run", liveRunId] });
     await queryClient.invalidateQueries({ queryKey: ["runs"] });
     await queryClient.invalidateQueries({ queryKey: ["library"] });
   };
 
   const handleConfirmStaging = async (overrides: Record<string, unknown>) => {
-    if (!activeRunId) return;
-    await confirmStaging(activeRunId, overrides);
-    await queryClient.invalidateQueries({ queryKey: ["run", activeRunId] });
+    if (!liveRunId) return;
+    await confirmStaging(liveRunId, overrides);
+    await queryClient.invalidateQueries({ queryKey: ["run", liveRunId] });
     await queryClient.invalidateQueries({ queryKey: ["runs"] });
   };
 
@@ -218,7 +274,7 @@ function App() {
       <Sidebar
         runs={runs}
         libraryRecords={libraryRecords}
-        selectedRunId={activeRunId}
+        selectedRunId={activeLegacyRunId}
         onSelect={openRunTab}
         onNew={handleNewTab}
         compareRunIds={compareRunIds}
@@ -237,17 +293,21 @@ function App() {
         <div className="flex-1 flex min-h-0">
           <ChatPane
             run={currentRun ?? null}
-            isLoading={Boolean(activeRunId) && isRunLoading}
+            session={currentSession ?? null}
+            sessionRuns={sessionRuns}
+            isLoading={(Boolean(activeLegacyRunId) && isRunLoading) || (Boolean(activeSessionId) && isSessionLoading)}
             isDraft={isDraftActive || openTabs.length === 0}
             liveEvents={liveEvents}
+            liveRunId={liveRunId}
             selectedFilename={
               activeArtifactKey ? openArtifactTabs.find((tab) => tab.key === activeArtifactKey)?.artifact.filename ?? null : null
             }
             onSelectArtifact={handleSelectArtifact}
             onOpenCharts={handleOpenCharts}
-            isChartsSelected={activeArtifactKey === (activeRunId ? artifactKey(activeRunId, CHARTS_FILENAME) : null)}
+            isChartsSelected={activeArtifactKey === (activeLegacyRunId ? artifactKey(activeLegacyRunId, CHARTS_FILENAME) : null)}
+            isChartsSelectedForRun={(runId) => activeArtifactKey === artifactKey(runId, CHARTS_FILENAME)}
             onSubmit={handleSubmit}
-            isRunning={currentRun?.status === "running" || currentRun?.status === "awaiting_confirmation"}
+            isRunning={Boolean(liveRunId)}
             onStop={() => void handleStop()}
             onConfirmStaging={handleConfirmStaging}
             compareRunIds={compareRunIds}

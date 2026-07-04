@@ -576,6 +576,29 @@ READ_SKILL_FILE_PARAMS = {
 }
 
 
+FORK_PREVIOUS_RUN_PARAMS = {
+    "type": "object",
+    "properties": {
+        "run_id": {"type": "string", "description": "Existing run_id selected from the current session context."},
+        "modification": {"type": "string", "description": "Requested change to apply to the selected parent run."},
+    },
+    "required": ["run_id", "modification"],
+}
+
+
+def build_fork_previous_run_skill(execute_fork_callback: Callable[[str, str], str]) -> Skill:
+    def _fork_previous_run(run_id: str, modification: str) -> dict[str, str]:
+        child_run_id = execute_fork_callback(run_id, modification)
+        return {"run_id": child_run_id, "parent_run_id": run_id}
+
+    return Skill(
+        "fork_previous_run",
+        "Fork a previous run from this session by explicit run_id and rerun it with a modification.",
+        FORK_PREVIOUS_RUN_PARAMS,
+        _fork_previous_run,
+    )
+
+
 def build_read_skill_file_skill(docs_dir: Path = DEFAULT_SKILL_DOCS_DIR) -> Skill:
     def _read_skill_file(skill: str, path: str) -> dict[str, str]:
         try:
@@ -610,6 +633,7 @@ def _build_registry(
     critic_llm,
     model: str,
     mcp_manager: MCPClientManager | None = None,
+    fork_previous_run_callback: Callable[[str, str], str] | None = None,
 ) -> SkillRegistry:
     registry = SkillRegistry()
     registry.register(build_fetch_ohlcv_skill(ctx))
@@ -618,6 +642,8 @@ def _build_registry(
     registry.register(build_run_cross_sectional_backtest_skill(ctx, run))
     registry.register(build_screen_factors_skill(ctx, run, run_store, critic_llm, model))
     registry.register(build_read_skill_file_skill(DEFAULT_SKILL_DOCS_DIR))
+    if fork_previous_run_callback is not None:
+        registry.register(build_fork_previous_run_skill(fork_previous_run_callback))
     registry.register(build_optimize_portfolio_skill(run_store, critic_llm, model, run))
     registry.register(
         Skill(
@@ -741,6 +767,9 @@ class Coordinator:
         prompt_override: str | None = None,
         cancel_event: threading.Event | None = None,
         staging_confirm: Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any] | None] | None = None,
+        session_context: str | None = None,
+        session_id: str | None = None,
+        turn_index: int | None = None,
     ) -> RunResult:
         """Drive the tool-use loop for an already-created Run.
 
@@ -771,19 +800,35 @@ class Coordinator:
                 on_event(event)
 
         if _is_library_question(user_request):
-            return self._execute_library_question(run, user_request, emit)
+            return self._execute_library_question(run, user_request, emit, session_id=session_id, turn_index=turn_index)
 
         ctx = _RunContext()
         ctx.staging_confirm = staging_confirm
         mcp_manager = MCPClientManager(self._mcp_configs, ctx) if self._mcp_configs else None
-        registry = _build_registry(ctx, run, self.run_store, self.critic_llm, self.model, mcp_manager)
+
+        def fork_previous_run(parent_run_id: str, modification: str) -> str:
+            child_run = self.run_store.create_run(f"Fork {parent_run_id}: {modification}")
+            return self.execute_fork(child_run, parent_run_id, modification).run_id
+
+        registry = _build_registry(
+            ctx,
+            run,
+            self.run_store,
+            self.critic_llm,
+            self.model,
+            mcp_manager,
+            fork_previous_run_callback=fork_previous_run if session_context else None,
+        )
         matched_skills = _select_skill_docs(user_request, skill_names)
         ctx.injected_skills = [skill.name for skill in matched_skills]
         system_prompt = build_augmented_system_prompt(SYSTEM_PROMPT, matched_skills)
+        user_content = prompt_override or user_request
+        if session_context:
+            user_content = f"{session_context}\n\n当前用户请求：\n{user_content}"
 
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt_override or user_request},
+            {"role": "user", "content": user_content},
         ]
 
         emit({"type": "start"})
@@ -826,6 +871,8 @@ class Coordinator:
             "derived_from_factor": derived_from_factor,
             "injected_skills": ctx.injected_skills,
             "factor_metadata": _factor_metadata(ctx.signal_code or "", factor_observations),
+            "session_id": session_id,
+            "turn_index": turn_index,
         }
         run.save_config(config)
 
@@ -887,6 +934,8 @@ class Coordinator:
             sandbox_usage=[asdict(item) for item in ctx.sandbox_usage],
             mcp_calls=ctx.mcp_calls,
             staging=ctx.staging,
+            session_id=session_id,
+            turn_index=turn_index,
         )
         if mcp_manager is not None:
             mcp_manager.close()
@@ -904,6 +953,8 @@ class Coordinator:
         run,
         user_request: str,
         emit: Callable[[dict[str, Any]], None],
+        session_id: str | None = None,
+        turn_index: int | None = None,
     ) -> RunResult:
         rows = summarize_library(ExperimentIndex.build())
         aggregate_json = json.dumps(rows, ensure_ascii=False, indent=2, sort_keys=True)
@@ -936,6 +987,8 @@ class Coordinator:
             "model": self.model,
             "critic_model": self.critic_model,
             "library_question": True,
+            "session_id": session_id,
+            "turn_index": turn_index,
         }
         run.save_config(config)
         run.save_json("library_summary.json", rows)
@@ -961,6 +1014,8 @@ class Coordinator:
             summary=summary,
             metrics={},
             review=None,
+            session_id=session_id,
+            turn_index=turn_index,
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics={}, warnings=[], summary=summary)
 

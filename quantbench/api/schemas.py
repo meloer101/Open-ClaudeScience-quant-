@@ -39,6 +39,28 @@ class NewRunResponse(BaseModel):
     status: str
 
 
+class NewSessionResponse(BaseModel):
+    session_id: str
+    created_at: str
+
+
+class SessionTurnRequest(BaseModel):
+    user_message: str
+
+
+class SessionTurnSchema(BaseModel):
+    turn_index: int
+    user_message: str
+    run_id: str | None = None
+    summary: dict = {}
+
+
+class SessionSchema(BaseModel):
+    session_id: str
+    created_at: str
+    turns: list[SessionTurnSchema]
+
+
 class StatusResponse(BaseModel):
     status: str
 

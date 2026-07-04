@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from quantbench.agent.coordinator import Coordinator, RunCancelled
+from quantbench.api.session import SessionStore, summarize_run
 from quantbench.artifact.store import ArtifactStore
 from quantbench.config import RUNS_DIR
 
@@ -33,6 +34,7 @@ _STREAM_END = object()
 class RunManager:
     def __init__(self, run_store: ArtifactStore | None = None, max_workers: int = 2):
         self._store = run_store or ArtifactStore(RUNS_DIR)
+        self._session_store = SessionStore(self._store.runs_dir)
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._queues: dict[str, queue.Queue] = {}
         self._cancel_events: dict[str, threading.Event] = {}
@@ -77,6 +79,37 @@ class RunManager:
                 cancel_event=cancel_event,
                 staging_confirm=staging_confirm,
             )
+
+        self._executor.submit(self._run_task, run, event_queue, work)
+        return run.run_id
+
+    def submit_session_turn(self, session_id: str, user_message: str, session_context: str, turn_index: int) -> str:
+        run = self._store.create_run(user_message)
+        coordinator = Coordinator(run_store=self._store)
+        event_queue: queue.Queue = queue.Queue()
+        self._queues[run.run_id] = event_queue
+        self._cancel_events[run.run_id] = threading.Event()
+
+        def on_event(event: dict[str, Any]) -> None:
+            event_queue.put(event)
+            if event.get("type") == "final":
+                event_queue.put(_STREAM_END)
+
+        def work(cancel_event: threading.Event) -> None:
+            def staging_confirm(run_id: str, artifact: dict[str, Any], config: dict[str, Any]) -> dict[str, Any] | None:
+                return self._await_staging_confirmation(run_id, event_queue, cancel_event, artifact, config)
+
+            coordinator.execute(
+                run,
+                user_message,
+                on_event=on_event,
+                cancel_event=cancel_event,
+                staging_confirm=staging_confirm,
+                session_context=session_context,
+                session_id=session_id,
+                turn_index=turn_index,
+            )
+            self._session_store.update_turn_summary(session_id, turn_index, summarize_run(run.run_id))
 
         self._executor.submit(self._run_task, run, event_queue, work)
         return run.run_id

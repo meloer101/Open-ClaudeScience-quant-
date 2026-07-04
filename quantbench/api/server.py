@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -13,13 +14,17 @@ from quantbench.api.schemas import (
     ArtifactInfo,
     ExperimentRecordSchema,
     ForkRequest,
+    NewSessionResponse,
     NewRunRequest,
     NewRunResponse,
     RunDetail,
     RunSummary,
+    SessionSchema,
+    SessionTurnRequest,
     StagingConfirmRequest,
     StatusResponse,
 )
+from quantbench.api.session import SessionStore, build_session_context
 from quantbench.library.aggregate import summarize
 from quantbench.library.compare import compare_runs, compute_returns_correlation
 from quantbench.library.index import ExperimentIndex, parse_csv_set
@@ -53,6 +58,10 @@ app.add_middleware(
 )
 
 
+def _session_store() -> SessionStore:
+    return SessionStore(run_reader.RUNS_DIR)
+
+
 @app.get("/api/library", response_model=list[ExperimentRecordSchema])
 def get_library(
     verdict: str | None = None,
@@ -72,6 +81,37 @@ def get_library(
         .sort(sort)
     )
     return [ExperimentRecordSchema(**record.to_dict()) for record in index.records]
+
+
+@app.post("/api/sessions", response_model=NewSessionResponse)
+def create_session() -> NewSessionResponse:
+    session = _session_store().create()
+    return NewSessionResponse(session_id=session.session_id, created_at=session.created_at)
+
+
+@app.get("/api/sessions/{session_id}", response_model=SessionSchema)
+def get_session(session_id: str) -> SessionSchema:
+    try:
+        session = _session_store().get(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="session not found") from None
+    return SessionSchema(**asdict(session))
+
+
+@app.post("/api/sessions/{session_id}/turns", response_model=NewRunResponse)
+def create_session_turn(session_id: str, payload: SessionTurnRequest) -> NewRunResponse:
+    if not payload.user_message.strip():
+        raise HTTPException(status_code=400, detail="user_message must not be empty")
+    store = _session_store()
+    try:
+        session = store.get(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="session not found") from None
+    session_context = build_session_context(session)
+    turn_index = len(session.turns)
+    run_id = _manager.submit_session_turn(session_id, payload.user_message, session_context, turn_index)
+    store.append_turn(session_id, payload.user_message, run_id, {})
+    return NewRunResponse(run_id=run_id, status="running")
 
 
 @app.get("/api/library/summary")

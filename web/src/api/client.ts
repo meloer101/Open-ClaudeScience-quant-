@@ -7,6 +7,7 @@ import type {
   MonitoringReport,
   ParquetPreview,
   PortfolioSummary,
+  ResearchSession,
   ReviewReportPayload,
   RunDetail,
   RunSummary,
@@ -40,6 +41,21 @@ export function createRun(userRequest: string): Promise<{ run_id: string; status
   return request("/runs", {
     method: "POST",
     body: JSON.stringify({ request: userRequest }),
+  });
+}
+
+export function createSession(): Promise<{ session_id: string; created_at: string }> {
+  return request("/sessions", { method: "POST" });
+}
+
+export function getSession(sessionId: string): Promise<ResearchSession> {
+  return request<ResearchSession>(`/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export function createSessionTurn(sessionId: string, userMessage: string): Promise<{ run_id: string; status: string }> {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
+    method: "POST",
+    body: JSON.stringify({ user_message: userMessage }),
   });
 }
 

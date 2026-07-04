@@ -44,6 +44,19 @@ export interface RunDetail {
   staging: StagingArtifact | null;
 }
 
+export interface SessionTurn {
+  turn_index: number;
+  user_message: string;
+  run_id: string | null;
+  summary: Record<string, unknown>;
+}
+
+export interface ResearchSession {
+  session_id: string;
+  created_at: string;
+  turns: SessionTurn[];
+}
+
 export interface StagingArtifact {
   factor_spec?: {
     natural_language_definition?: string;
