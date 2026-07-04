@@ -7,6 +7,8 @@
 > 2026-07-04 更新：合并第二轮独立审查（Codex）的发现，三个阻断项均已逐条对照代码核实，见「〇之二」。其中 funding 低估 bug 推翻了本文初版"crypto 为主打"建议的前提。
 >
 > 2026-07-04 复查（第三轮）：B1–B4 阻断项已全部落地并逐条核实修复正确（非仅 commit message）；测试 325→**346 passed / 1 skipped**（+21 新测试）；产品 onboarding（`quantbench serve` 一键启动、`quantbench examples seed` 种子数据、CHANGELOG/RELEASE）、内部文档归档至 `docs/dev/`、API token+CORS allowlist 均已就位。**阻断项已清零，具备公开首发条件。** 逐条核实见「〇之三」。
+>
+> 2026-07-04 V0 发布复查：补齐直接命中 B1 原始输入形状的 funding 聚合回归测试（同一持仓期 3 条 8h funding rows 必须求和，临时改回取单条时测试失败）；`pyproject.toml` / `CHANGELOG.md` 已对齐到 `0.1.0`；本地 release checklist 已实跑通过：后端 **350 passed / 1 skipped**、前端 lint/Vitest/build/Playwright、wheel smoke、LLM eval、clean `QUANTBENCH_HOME` examples seed + serve。
 
 ---
 
@@ -80,6 +82,16 @@
 | 附带 PerpetualData schema | ✅ | 新增 [data/perpetual_schema.py](quantbench/data/perpetual_schema.py)，顺手还了 GAP 1.5 的 schema 债 |
 
 **结论修订**：Codex 与本文初版"先受信任 alpha、修复后再公开首发"的前置条件已满足——阻断项清零、测试全绿、产品 onboarding 就位。下方「一~三」章中被上述修复覆盖的条目视为已关闭，剩余为可延后增强项。
+
+### V0 release checklist 复查（2026-07-04）
+
+| 项 | 状态 | 核实依据 |
+|---|---|---|
+| B1 原始 bug 模式回归测试 | ✅ 新增 | [test_engine_funding.py](tests/test_engine_funding.py) 覆盖同一日内 00:00/08:00/16:00 三条 funding row 求和；临时把 `aggfunc="sum"` 改为取单条时关键测试失败 |
+| funding coverage 指标 | ✅ 新增 | 同一测试文件覆盖 `coverage_ratio < 1.0` 与 `missing_period_symbol_pairs > 0` |
+| funding warning 条件化 | ✅ 复核 | 同一测试文件验证 coverage 数字进入 warning 文案，完整 coverage 时不警告 |
+| 版本 / CHANGELOG | ✅ 对齐 | [pyproject.toml](pyproject.toml) `0.1.0` 与 [CHANGELOG.md](CHANGELOG.md) 最新 `0.1.0 - 2026-07-04` 一致，无空 `Unreleased` |
+| 本地 release checklist | ✅ 通过 | `uv run pytest -q`、前端 lint/unit/build/e2e、wheel smoke、LLM eval、clean-home seed+serve 均已实跑 |
 
 ---
 

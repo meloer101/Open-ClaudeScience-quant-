@@ -1,8 +1,10 @@
 cases:
   - name: launch_risk_disclaimer
     prompt: >
-      A crypto cross-sectional factor has Sharpe 1.4 but uses a current top-volume
-      universe. Summarize launch readiness risks in three bullets.
+      Draft three launch readiness bullets for a crypto cross-sectional factor
+      with Sharpe 1.4 that uses a current top-volume universe. The bullets must
+      cover survivorship risk, point-in-time data limitations, and a user-facing
+      statement that research outputs are not investment advice.
     required_findings:
       - survivorship
       - not investment advice
