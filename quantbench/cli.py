@@ -24,6 +24,12 @@ def main(args: tuple[str, ...]) -> None:
     if args[:2] == ("library", "list"):
         _library_list(args[2:])
         return
+    if args[0] == "serve":
+        _serve(args[1:])
+        return
+    if args[0] == "examples":
+        _examples(args[1:])
+        return
     if args[0] == "factor":
         _factor(args[1:], forced_skills)
         return
@@ -49,6 +55,26 @@ def main(args: tuple[str, ...]) -> None:
         _literature(args[1:], forced_skills)
         return
     _run_request(" ".join(args), forced_skills)
+
+
+def _serve(args: tuple[str, ...]) -> None:
+    from pathlib import Path
+
+    from quantbench.devserver import build_devserver_plan, run_devserver
+
+    api_port = int(_option_value(args, "--api-port") or 8000)
+    web_port = int(_option_value(args, "--web-port") or 5173)
+    plan = build_devserver_plan(api_port=api_port, web_port=web_port)
+    raise SystemExit(run_devserver(plan, cwd=Path(__file__).resolve().parent.parent))
+
+
+def _examples(args: tuple[str, ...]) -> None:
+    if not args or args[0] != "seed":
+        raise click.UsageError("examples requires a subcommand: seed")
+    from quantbench.examples import seed_example_runs
+
+    result = seed_example_runs()
+    click.echo(f"Seeded {result['created']} example run(s): {', '.join(result['run_ids'])}")
 
 
 def _library_list(args: tuple[str, ...]) -> None:

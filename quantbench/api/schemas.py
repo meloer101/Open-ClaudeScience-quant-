@@ -34,6 +34,18 @@ class NewRunRequest(BaseModel):
     request: str
 
 
+class CostEstimateRequest(BaseModel):
+    request: str
+
+
+class CostEstimateResponse(BaseModel):
+    estimated_tokens: int
+    estimated_usd: float
+    coordinator_calls: int
+    critic_calls: int
+    note: str
+
+
 class NewRunResponse(BaseModel):
     run_id: str
     status: str

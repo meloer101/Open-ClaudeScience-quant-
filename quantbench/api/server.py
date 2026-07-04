@@ -14,6 +14,8 @@ from quantbench.api.schemas import (
     ArtifactInfo,
     AskPaperRequest,
     AskPaperResponse,
+    CostEstimateRequest,
+    CostEstimateResponse,
     ExperimentRecordSchema,
     ForkRequest,
     IngestPaperRequest,
@@ -31,6 +33,7 @@ from quantbench.api.schemas import (
     StatusResponse,
 )
 from quantbench.api.session import SessionStore, build_session_context
+from quantbench.costing import estimate_request_cost
 from quantbench.library.aggregate import summarize
 from quantbench.library.compare import compare_runs, compute_returns_correlation
 from quantbench.library.index import ExperimentIndex, parse_csv_set
@@ -312,6 +315,13 @@ def create_run(payload: NewRunRequest) -> NewRunResponse:
         raise HTTPException(status_code=400, detail="request must not be empty")
     run_id = _manager.submit(payload.request)
     return NewRunResponse(run_id=run_id, status="running")
+
+
+@app.post("/api/runs/estimate-cost", response_model=CostEstimateResponse)
+def estimate_run_cost(payload: CostEstimateRequest) -> CostEstimateResponse:
+    if not payload.request.strip():
+        raise HTTPException(status_code=400, detail="request must not be empty")
+    return CostEstimateResponse(**estimate_request_cost(payload.request))
 
 
 def _mark_orphaned_run_cancelled(run_id: str) -> None:
