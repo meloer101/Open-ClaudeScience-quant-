@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listRuns,
@@ -17,8 +17,12 @@ import { Sidebar } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
 import { ChatPane } from "./components/ChatPane";
 import { LiteratureViewer } from "./components/LiteratureViewer";
-import { ArtifactInspector, type OpenArtifactTab } from "./components/ArtifactInspector";
+import type { OpenArtifactTab } from "./components/ArtifactInspector";
 import { ResizeHandle } from "./components/ResizeHandle";
+
+const ArtifactInspector = lazy(() =>
+  import("./components/ArtifactInspector").then((module) => ({ default: module.ArtifactInspector })),
+);
 
 const DRAFT_ID = "draft";
 const PAPER_PREFIX = "paper:";
@@ -350,13 +354,15 @@ function App() {
             onForked={handleForked}
           />
           <ResizeHandle onResize={handleInspectorResize} />
-          <ArtifactInspector
-            tabs={openArtifactTabs}
-            activeKey={activeArtifactKey}
-            onSelectTab={setActiveArtifactKey}
-            onCloseTab={closeArtifactTab}
-            width={inspectorWidth}
-          />
+          <Suspense fallback={<div className="h-full border-l border-slate-200 bg-white" style={{ width: inspectorWidth }} />}>
+            <ArtifactInspector
+              tabs={openArtifactTabs}
+              activeKey={activeArtifactKey}
+              onSelectTab={setActiveArtifactKey}
+              onCloseTab={closeArtifactTab}
+              width={inspectorWidth}
+            />
+          </Suspense>
           </>
           )}
         </div>

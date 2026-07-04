@@ -16,20 +16,26 @@ import type {
   RunSummary,
 } from "../types";
 
-const apiToken = import.meta.env.VITE_QUANTBENCH_API_TOKEN as string | undefined;
+const API_BASE = import.meta.env.VITE_QUANTBENCH_API_BASE ?? "/api";
+const API_TOKEN = import.meta.env.VITE_QUANTBENCH_API_TOKEN ?? "";
 
-function authHeaders(extra?: HeadersInit): HeadersInit {
-  return {
-    "Content-Type": "application/json",
-    ...(apiToken ? { "X-QuantBench-Token": apiToken } : {}),
-    ...(extra ?? {}),
-  };
+function authHeaders(extra?: HeadersInit): Headers {
+  const headers = new Headers(extra);
+  headers.set("Content-Type", "application/json");
+  if (API_TOKEN) headers.set("X-QuantBench-Token", API_TOKEN);
+  return headers;
+}
+
+function authUrl(path: string): string {
+  if (!API_TOKEN) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}token=${encodeURIComponent(API_TOKEN)}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    headers: authHeaders(),
+  const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    headers: authHeaders(init?.headers),
   });
   if (!response.ok) {
     const body = await response.text();
@@ -131,9 +137,9 @@ export function ingestPaper(source: string): Promise<PaperSummary> {
 export async function uploadPaper(file: File): Promise<PaperSummary> {
   const body = new FormData();
   body.append("file", file);
-  const response = await fetch("/api/literature/ingest/upload", {
+  const response = await fetch(`${API_BASE}/literature/ingest/upload`, {
     method: "POST",
-    headers: apiToken ? { "X-QuantBench-Token": apiToken } : undefined,
+    headers: API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined,
     body,
   });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
@@ -145,7 +151,7 @@ export function getPaper(paperId: string): Promise<PaperDetail> {
 }
 
 export function paperPdfUrl(paperId: string): string {
-  return `/api/literature/${encodeURIComponent(paperId)}/pdf`;
+  return authUrl(`${API_BASE}/literature/${encodeURIComponent(paperId)}/pdf`);
 }
 
 export function askPaper(
@@ -169,15 +175,17 @@ export function reproducePaper(
 }
 
 export function artifactUrl(runId: string, filename: string): string {
-  return `/api/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(filename)}`;
+  return authUrl(`${API_BASE}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(filename)}`);
 }
 
 export function runEventsUrl(runId: string): string {
-  return `/api/runs/${encodeURIComponent(runId)}/events`;
+  return authUrl(`${API_BASE}/runs/${encodeURIComponent(runId)}/events`);
 }
 
 async function fetchArtifactJson<T>(runId: string, filename: string): Promise<T | null> {
-  const response = await fetch(artifactUrl(runId, filename));
+  const response = await fetch(artifactUrl(runId, filename), {
+    headers: API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined,
+  });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<T>;
@@ -188,7 +196,9 @@ export async function getBacktestResult(runId: string): Promise<BacktestResultPa
   // runs wrote a different filename before it was unified with the
   // single-symbol path (see run_reader.read_backtest_result on the backend).
   // This endpoint resolves either name so the frontend never has to guess.
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/backtest-result`);
+  const response = await fetch(authUrl(`${API_BASE}/runs/${encodeURIComponent(runId)}/backtest-result`), {
+    headers: API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined,
+  });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<BacktestResultPayload>;
@@ -199,7 +209,9 @@ export function getReviewReport(runId: string): Promise<ReviewReportPayload | nu
 }
 
 export async function getPortfolioSummary(runId: string): Promise<PortfolioSummary | null> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/portfolio`);
+  const response = await fetch(authUrl(`${API_BASE}/runs/${encodeURIComponent(runId)}/portfolio`), {
+    headers: API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined,
+  });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<PortfolioSummary>;
@@ -210,12 +222,16 @@ export function previewParquet(runId: string, filename: string): Promise<Parquet
 }
 
 export async function getMonitoringReport(runId: string): Promise<MonitoringReport | null> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/monitoring`);
+  const response = await fetch(authUrl(`${API_BASE}/runs/${encodeURIComponent(runId)}/monitoring`), {
+    headers: API_TOKEN ? { "X-QuantBench-Token": API_TOKEN } : undefined,
+  });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<MonitoringReport>;
 }
 
-export function triggerMonitoringCheck(runId: string): Promise<DecayReportEntry | { error: string } | { skipped: string; verdict: string | null }> {
+export function triggerMonitoringCheck(
+  runId: string,
+): Promise<DecayReportEntry | { error: string } | { skipped: string; verdict: string | null }> {
   return request(`/runs/${encodeURIComponent(runId)}/monitoring/check`, { method: "POST" });
 }

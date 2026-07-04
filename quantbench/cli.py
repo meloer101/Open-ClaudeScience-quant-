@@ -14,12 +14,14 @@ from quantbench.factors.parametrize import parse_param_overrides
 from quantbench.factors.store import FactorStore
 from quantbench.library.compare import compare_runs
 from quantbench.library.index import ExperimentIndex, parse_csv_set
+from quantbench.platform import assert_supported_platform
 from quantbench.skilldocs.registry import SkillRegistryDocs
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"], "ignore_unknown_options": True})
 @click.argument("args", nargs=-1, required=True, type=click.UNPROCESSED)
 def main(args: tuple[str, ...]) -> None:
+    assert_supported_platform()
     forced_skills, args = _consume_repeated_option(args, "--skill")
     if args[:2] == ("library", "list"):
         _library_list(args[2:])

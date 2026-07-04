@@ -25,6 +25,12 @@ jobs:
       - name: Golden run discipline (GAP 5.1 regression lock)
         run: uv run pytest tests/test_golden_run_discipline.py -v
 
+      - name: Wheel smoke
+        run: |
+          uv run python -m build
+          uv pip install --force-reinstall dist/*.whl
+          uv run quantbench --help
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -32,17 +38,22 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
+
       - name: Install frontend dependencies
         run: npm ci
+
       - name: Lint frontend
         run: npm run lint
+
       - name: Unit test frontend
         run: npm test
+
       - name: Build frontend
         run: npm run build
 
@@ -53,14 +64,27 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Install backend dependencies
+        run: uv sync
+        working-directory: .
+
       - name: Install frontend dependencies
         run: npm ci
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+
       - name: Run Playwright
         run: npm run test:e2e

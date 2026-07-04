@@ -5,8 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "quantbench"
 version = "0.1.0"
-description = "Phase 0 CLI prototype for reproducible quantitative research runs."
-requires-python = ">=3.10"
+description = "Local AI workbench for reproducible quantitative research runs."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Financial and Insurance Industry",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
   "ccxt",
   "click",
@@ -28,7 +40,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["build", "pytest"]
+
+[project.scripts]
+quantbench = "quantbench.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
