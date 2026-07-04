@@ -120,7 +120,9 @@ class RunManager:
             except Exception:
                 consolidation = None
             if consolidation is not None:
-                self._append_run_audit(run.run_id, consolidation.memory_events, consolidation.delegations)
+                self._append_run_audit(
+                    run.run_id, consolidation.memory_events, consolidation.delegations, consolidation.llm_usage
+                )
                 for message in consolidation.visible_messages:
                     event_queue.put({"type": "memory", "message": message, "events": consolidation.memory_events})
             event_queue.put(_STREAM_END)
@@ -200,7 +202,13 @@ class RunManager:
             with self._lock:
                 self._staging_waiters.pop(run_id, None)
 
-    def _append_run_audit(self, run_id: str, memory_events: list[dict[str, Any]], delegations: list[dict[str, Any]]) -> None:
+    def _append_run_audit(
+        self,
+        run_id: str,
+        memory_events: list[dict[str, Any]],
+        delegations: list[dict[str, Any]],
+        llm_usage: list[dict[str, Any]] | None = None,
+    ) -> None:
         manifest_path = self._store.runs_dir / run_id / "manifest.json"
         if not manifest_path.exists():
             return
@@ -209,6 +217,7 @@ class RunManager:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["memory_events"] = [*(manifest.get("memory_events") or []), *memory_events]
         manifest["delegations"] = [*(manifest.get("delegations") or []), *delegations]
+        manifest["llm_usage"] = [*(manifest.get("llm_usage") or []), *(llm_usage or [])]
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def has_live_stream(self, run_id: str) -> bool:

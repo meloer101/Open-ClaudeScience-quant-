@@ -16,6 +16,7 @@ class MemoryConsolidationResult:
     memory_events: list[dict[str, Any]]
     visible_messages: list[str]
     delegations: list[dict[str, Any]]
+    llm_usage: list[dict[str, Any]]
 
 
 def build_memory_consolidation_agent() -> SubAgent:
@@ -52,7 +53,8 @@ def consolidate_session(
             for turn in session.turns
         ],
     }
-    output = run_subagent(llm, agent, payload)
+    llm_usage: list[dict[str, Any]] = []
+    output = run_subagent(llm, agent, payload, usage_sink=llm_usage)
     candidates = output.get("candidates") or []
     if not isinstance(candidates, list):
         candidates = []
@@ -104,7 +106,7 @@ def consolidate_session(
         emitted_events.append(event)
         visible_messages.append(f"已写入记忆: {fact.description}")
 
-    return MemoryConsolidationResult(emitted_events, visible_messages, delegations)
+    return MemoryConsolidationResult(emitted_events, visible_messages, delegations, llm_usage)
 
 
 def _normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:

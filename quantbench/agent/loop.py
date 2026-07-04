@@ -3,6 +3,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from quantbench.agent.llm import record_llm_usage
 from quantbench.agent.run_context import RunCancelled, _RunContext
 from quantbench.config import MAX_STEPS
 from quantbench.skills.registry import SkillRegistry
@@ -46,6 +47,7 @@ def run_agent_loop(
             raise RunCancelled(run.run_id)
 
         response = llm.chat(messages, tools=registry.schemas())
+        record_llm_usage(response, getattr(llm, "model", "unknown"), ctx.llm_usage, step="coordinator")
         message = response.choices[0].message
         messages.append(_message_to_dict(message))
 

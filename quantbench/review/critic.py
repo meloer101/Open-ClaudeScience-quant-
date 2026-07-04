@@ -71,6 +71,7 @@ def run_critic(
     metrics: dict,
     summary: str,
     context: dict,
+    usage_sink: list[dict] | None = None,
 ) -> CriticReport:
     try:
         user_payload = {
@@ -87,7 +88,7 @@ def run_critic(
             max_turns=1,
             output_schema=_CRITIC_OUTPUT_SCHEMA,
         )
-        payload = run_subagent(llm, agent, user_payload)
+        payload = run_subagent(llm, agent, user_payload, usage_sink=usage_sink)
         verdict = _optional_str(payload.get("verdict"))
         issues = _string_list(payload.get("narrative_consistency_issues"))
         if verdict is not None:

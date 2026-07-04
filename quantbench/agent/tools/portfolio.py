@@ -225,6 +225,7 @@ def _run_portfolio_optimization(
         parent_run_id=parent_run_id,
         delegations=ctx.delegations,
         mcp_calls=ctx.mcp_calls,
+        llm_usage=ctx.llm_usage,
     )
 
     return {

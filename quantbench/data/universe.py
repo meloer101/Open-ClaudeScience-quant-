@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import yaml
 
 from quantbench.data.providers.ccxt_perpetual import fetch_top_symbols_by_volume
 from quantbench.data.providers.ccxt_perpetual import name as ccxt_provider_name
+from quantbench.data.providers.crypto_universe_history import (
+    daily_date_range,
+    earliest_snapshot_date,
+    reconstruct_crypto_membership_intervals,
+)
 from quantbench.data.providers.sp500_constituents import WIKIPEDIA_SP500_URL, fetch_current_constituents
 from quantbench.data.providers.sp500_history import build_point_in_time_sp500
 
@@ -44,6 +49,17 @@ PIT_SP500_NOTE = (
 )
 
 
+PIT_CRYPTO_NOTE = (
+    "This universe is reconstructed from accumulated daily crypto universe "
+    "snapshots (`quantbench universe snapshot-crypto`), not a complete "
+    "historical ranking log - membership intervals only cover days that were "
+    "actually snapshotted, and a gap in snapshot coverage splits an interval "
+    "rather than assuming continuity through it. Completeness improves as "
+    "more daily snapshots accumulate; a narrow window right after snapshots "
+    "started will have sparse, low-confidence intervals."
+)
+
+
 @dataclass(frozen=True)
 class UniverseDefinition:
     name: str
@@ -64,6 +80,19 @@ class UniverseDefinition:
     def save_yaml(self, path: Path) -> Path:
         path.write_text(yaml.safe_dump(self.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
         return path
+
+
+def apply_covers_delisted(universe: UniverseDefinition, fetch_meta: dict) -> UniverseDefinition:
+    """Applies fetch_universe_ohlcv's aggregated covers_delisted flag (GAP 1.2)
+    back onto the UniverseDefinition that was built before any data was
+    fetched. Frozen dataclass, so this returns a new instance rather than
+    mutating in place; callers reassign ctx.universe to the result. A no-op
+    (returns universe unchanged) when the flag doesn't actually change, so
+    callers can call this unconditionally without extra branching."""
+    covers_delisted = bool(fetch_meta.get("covers_delisted"))
+    if covers_delisted == universe.covers_delisted:
+        return universe
+    return replace(universe, covers_delisted=covers_delisted)
 
 
 def build_sp500_universe(
@@ -150,6 +179,61 @@ def build_crypto_perpetual_universe(as_of_date: str, limit: int = 30) -> Univers
     )
 
 
+def build_point_in_time_crypto_perpetual(
+    start: str,
+    end: str,
+    as_of_date: str,
+    *,
+    quote: str = "USDT",
+    limit: int = 30,
+    conn=None,
+) -> UniverseDefinition:
+    """Reconstructs a crypto perpetual universe from accumulated daily
+    snapshots (GAP 1.1). Lazily imports from quantbench.data.warehouse (rather
+    than a top-level import) because warehouse.py already imports from this
+    module - a top-level import here would be circular.
+
+    Raises if not a single day in [start, end] was ever snapshotted; a
+    point-in-time universe with zero real historical grounding would be
+    indistinguishable from a bug, not a legitimately-empty result."""
+    from quantbench.data.warehouse import get_connection, query_crypto_universe_snapshot
+
+    own_conn = conn is None
+    conn = conn or get_connection()
+    try:
+        dates = daily_date_range(start, end)
+        daily_snapshots = {date: query_crypto_universe_snapshot(conn, date) for date in dates}
+    finally:
+        if own_conn:
+            conn.close()
+
+    if earliest_snapshot_date(daily_snapshots) is None:
+        raise ValueError(
+            f"no crypto universe snapshot exists for any day in [{start}, {end}] - "
+            "point-in-time reconstruction needs at least one day of accumulated "
+            "snapshot history. Run `quantbench universe snapshot-crypto` going forward, "
+            "or use point_in_time=False for the current-ranking universe."
+        )
+
+    intervals = reconstruct_crypto_membership_intervals(daily_snapshots)
+    symbols = sorted(intervals.keys())
+    if limit is not None and limit >= 1:
+        symbols = symbols[:limit]
+        intervals = {symbol: intervals[symbol] for symbol in symbols}
+
+    return UniverseDefinition(
+        name="top_usdt_perpetual_pit",
+        as_of_date=as_of_date,
+        symbols=symbols,
+        point_in_time=True,
+        survivorship_bias_note=PIT_CRYPTO_NOTE,
+        source="crypto_universe_snapshot_table",
+        sample_limit=limit,
+        asset_class="crypto",
+        membership_intervals=_serializable_intervals(intervals),
+    )
+
+
 def build_universe(
     name: str,
     as_of_date: str,
@@ -157,6 +241,7 @@ def build_universe(
     limit: int | None = None,
     start: str | None = None,
     end: str | None = None,
+    conn=None,
 ) -> UniverseDefinition:
     normalized = name.lower().replace("-", "").replace("_", "")
     if normalized in {"sp500", "s&p500", "sandp500"}:
@@ -169,9 +254,13 @@ def build_universe(
         )
     top_n_match = re.fullmatch(r"top(\d+)usdtperpetual", normalized)
     if normalized in {"topusdtperpetual", "cryptoperpetual", "usdtperpetual"} or top_n_match:
-        if point_in_time:
-            raise NotImplementedError("Point-in-time crypto perpetual membership is not implemented in Phase 5 v1")
         parsed_limit = int(top_n_match.group(1)) if top_n_match else 30
+        if point_in_time:
+            if not start or not end:
+                raise ValueError("point-in-time crypto perpetual universe requires start and end")
+            return build_point_in_time_crypto_perpetual(
+                start=start, end=end, as_of_date=as_of_date, limit=limit or parsed_limit, conn=conn
+            )
         return build_crypto_perpetual_universe(as_of_date=as_of_date, limit=limit or parsed_limit)
     raise ValueError(f"Unsupported universe: {name}")
 

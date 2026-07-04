@@ -16,6 +16,7 @@ def _run_critic_for_context(ctx: _RunContext, run, critic_llm, summary: str, con
         metrics=ctx.last_metrics or {},
         summary=summary,
         context=context,
+        usage_sink=ctx.llm_usage,
     )
     ctx.critic_report = critic_report
     ctx.delegations.append(

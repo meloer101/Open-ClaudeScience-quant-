@@ -21,7 +21,7 @@ from quantbench.config import SCREEN_MAX_CANDIDATES, SCREEN_MAX_WORKERS
 from quantbench.config import SKILL_DOCS_DIR as DEFAULT_SKILL_DOCS_DIR
 from quantbench.data.cache import file_sha256
 from quantbench.data.exchange import SYNTHETIC_FALLBACK_SOURCE, fetch_ohlcv
-from quantbench.data.universe import build_universe
+from quantbench.data.universe import apply_covers_delisted, build_universe
 from quantbench.data.warehouse import fetch_universe_funding_rates, fetch_universe_ohlcv
 from quantbench.engine.cross_sectional_backtest import run_cross_sectional_backtest
 from quantbench.engine.execution import ExecutionConfig
@@ -209,6 +209,7 @@ def build_run_cross_sectional_backtest_skill(ctx: _RunContext, run) -> Skill:
             return {"error": "no universe loaded yet - call build_universe first"}
 
         panel, cache_meta = fetch_universe_ohlcv(ctx.universe, timeframe, start, end)
+        ctx.universe = apply_covers_delisted(ctx.universe, cache_meta)
         funding_rates = None
         funding_meta = None
         if _is_crypto_universe(ctx.universe):
@@ -476,6 +477,7 @@ def build_screen_factors_skill(ctx: _RunContext, run, run_store: ArtifactStore, 
             normalized.append({"name": name, "code": code})
 
         panel, cache_meta = fetch_universe_ohlcv(ctx.universe, timeframe, start, end)
+        ctx.universe = apply_covers_delisted(ctx.universe, cache_meta)
         funding_rates = None
         funding_meta = None
         if _is_crypto_universe(ctx.universe):
@@ -498,6 +500,14 @@ def build_screen_factors_skill(ctx: _RunContext, run, run_store: ArtifactStore, 
         neutralize_dims = _neutralize_dimensions(neutralize)
         sector = _sector_series(ctx.universe)
         execution_config = _execution_config(execution)
+        # GAP 5.4: surfaced in the returned payload before the (expensive) fan-out below
+        # runs, so the caller sees the cost shape up front. Purely informational - this
+        # does not add a new blocking gate; each candidate's own cross-sectional backtest
+        # still goes through its own per-candidate StagingGate (1.4) independently.
+        cost_estimate = asdict(
+            CostEstimate(kind="screen", observations=len(panel), candidates=len(normalized))
+        )
+        cost_estimate["estimated_critic_delegations"] = len(normalized)
 
         def _screen_one(candidate: dict[str, Any]) -> dict[str, Any]:
             return _run_screen_candidate(
@@ -555,6 +565,7 @@ def build_screen_factors_skill(ctx: _RunContext, run, run_store: ArtifactStore, 
             "borrow_model": "tiered_adv_assumption" if borrow_config.enabled else "not_applied",
             "neutralize": neutralize_dims,
             "effective_trials": effective_trials,
+            "cost_estimate": cost_estimate,
             "trial_count": asdict(trial_count),
             "pbo": asdict(pbo_result) if pbo_result is not None else None,
             "critic_model": str(getattr(critic_llm, "model", CRITIC_MODEL)),
@@ -948,6 +959,7 @@ class Coordinator:
             turn_index=turn_index,
             applied_memory_defaults=ctx.applied_memory_defaults,
             memory_events=ctx.memory_events,
+            llm_usage=ctx.llm_usage,
         )
         if mcp_manager is not None:
             mcp_manager.close()
@@ -1031,6 +1043,7 @@ class Coordinator:
             turn_index=turn_index,
             applied_memory_defaults=[],
             memory_events=[],
+            llm_usage=[],
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics={}, warnings=[], summary=summary)
 
@@ -1138,6 +1151,7 @@ class Coordinator:
             sandbox_usage=[asdict(item) for item in ctx.sandbox_usage],
             mcp_calls=ctx.mcp_calls,
             memory_events=[],
+            llm_usage=ctx.llm_usage,
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics=metrics, warnings=ctx.warnings, summary=summary)
 

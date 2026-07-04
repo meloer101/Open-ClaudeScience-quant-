@@ -19,6 +19,11 @@ class ProviderResult:
     source: str
     fallback_reason: str | None = None
     adjustment: Adjustment | None = None
+    # GAP 1.2: does this provider's fetch_ohlcv reliably return delisted-symbol
+    # history? A capability the provider itself declares, rather than a universe
+    # metadata field hardcoded to False everywhere it's built - see
+    # quantbench.data.universe.apply_covers_delisted for how this propagates.
+    covers_delisted: bool = False
 
 
 class MarketDataProvider(Protocol):

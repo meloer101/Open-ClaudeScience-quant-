@@ -321,6 +321,7 @@ def _run_screen_candidate(
             delegations=ctx.delegations,
             sandbox_usage=[asdict(item) for item in ctx.sandbox_usage],
             mcp_calls=ctx.mcp_calls,
+            llm_usage=ctx.llm_usage,
         )
         item = _screen_item(candidate["name"], child.run_id, "completed", backtest.metrics, review_report, ctx.critic_report)
         item["_returns"] = backtest.returns

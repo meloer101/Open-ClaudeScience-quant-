@@ -9,7 +9,7 @@ from quantbench.config import DATA_CACHE_DIR
 from quantbench.data.cache import file_sha256
 from quantbench.data.exchange import fetch_ohlcv
 from quantbench.data.providers.ccxt_perpetual import fetch_funding_rate
-from quantbench.data.universe import UniverseDefinition
+from quantbench.data.universe import UniverseDefinition, apply_covers_delisted
 
 
 OHLCV_TABLE = "ohlcv"
@@ -262,6 +262,7 @@ def fetch_universe_ohlcv(
                     "source": meta.get("source"),
                     "adjustment": meta.get("adjustment"),
                     "fallback_reason": meta.get("fallback_reason"),
+                    "covers_delisted": bool(meta.get("covers_delisted")),
                 }
             )
         except Exception as exc:
@@ -271,6 +272,11 @@ def fetch_universe_ohlcv(
     if own_conn:
         conn.close()
 
+    # GAP 1.2: the universe only "covers delisted" if every fetched symbol's
+    # provider declared covers_delisted=True and nothing failed to fetch -
+    # conservative by construction, so a single yfinance/ccxt symbol (or a
+    # fetch failure) can't be silently masked by an otherwise-Polygon universe.
+    covers_delisted = bool(data_slices) and not failed and all(slice_["covers_delisted"] for slice_ in data_slices)
     meta = {
         "symbols_requested": len(universe.symbols),
         "symbols_fetched": fetched,
@@ -278,9 +284,15 @@ def fetch_universe_ohlcv(
         "failed": failed,
         "sources": sources,
         "data_slices": data_slices,
+        "covers_delisted": covers_delisted,
     }
     if universe.point_in_time and universe.membership_intervals:
-        meta["coverage_report"] = universe_coverage_report(universe, panel, start, end, timeframe=timeframe)
+        # Uses the just-fetched covers_delisted (not the stale value on the
+        # universe object built before any data existed) - apply_covers_delisted
+        # is a no-op if it doesn't actually change anything, so this is safe to
+        # call unconditionally.
+        fetched_universe = apply_covers_delisted(universe, meta)
+        meta["coverage_report"] = universe_coverage_report(fetched_universe, panel, start, end, timeframe=timeframe)
     return panel, meta
 
 

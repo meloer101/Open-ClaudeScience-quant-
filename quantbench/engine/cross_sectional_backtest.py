@@ -37,6 +37,12 @@ class CrossSectionalBacktestResult:
     capacity_curve: list[dict[str, float]]
     liquidity_cost: pd.Series
     borrow_cost: pd.Series
+    # Target weights (timestamp index, symbol columns) before liquidity
+    # capping - GAP 5.3 signal export reads the latest row as "current period
+    # target weights"; turnover/funding/borrow costs above are computed from
+    # this same matrix, so it was already available internally, just not
+    # returned to callers.
+    weights: pd.DataFrame
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -218,6 +224,7 @@ def run_cross_sectional_backtest(
         capacity_curve=curve,
         liquidity_cost=liquidity_cost.reindex(net_returns.index).fillna(0),
         borrow_cost=borrow_cost.reindex(net_returns.index).fillna(0),
+        weights=weights,
     )
 
 

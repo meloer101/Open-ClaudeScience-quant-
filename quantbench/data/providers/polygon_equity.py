@@ -23,7 +23,9 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> ProviderRe
     if not api_key:
         raise RuntimeError("POLYGON_API_KEY is not configured; polygon_equity is a formal provider slot only")
     raise NotImplementedError(
-        "polygon_equity schema slot is defined, but live Polygon fetch is intentionally not enabled in Phase 11"
+        "polygon_equity schema slot is defined, but live Polygon fetch is intentionally not enabled in Phase 11. "
+        "When enabled: Polygon's aggregates endpoint does serve delisted-ticker history, so the ProviderResult "
+        "this returns should set covers_delisted=True (GAP 1.2), unlike yfinance/ccxt_perpetual's False."
     )
 
 

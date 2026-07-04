@@ -23,6 +23,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> ProviderRe
         df=download_ohlcv(symbol, timeframe, start, end),
         source="yfinance",
         adjustment=Adjustment(method="raw", dividend_reinvested=False),
+        # yfinance does not reliably serve delisted-ticker history (GAP 1.2).
+        covers_delisted=False,
     )
 
 

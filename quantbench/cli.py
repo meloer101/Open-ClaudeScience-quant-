@@ -239,7 +239,7 @@ def _echo_monitor_table(results: list[dict]) -> None:
 
 def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:
     if not args:
-        raise click.UsageError("factor requires a subcommand: save/list/show/use/track/retire")
+        raise click.UsageError("factor requires a subcommand: save/list/show/use/track/retire/export")
     command = args[0]
     store = FactorStore(DEFAULT_FACTORS_DIR)
     if command == "save":
@@ -280,6 +280,31 @@ def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:
             raise click.UsageError("factor use requires --on REQUEST")
         result = Coordinator().run_from_factor(name, params, request, skill_names=forced_skills, factor_store=store)
         _echo_run_result(result)
+        return
+    if command == "export":
+        if len(args) < 2:
+            raise click.UsageError("factor export requires name")
+        from quantbench.factors.signal_export import build_signal_export
+
+        payload = build_signal_export(store.load_factor(args[1]))
+        if "--json-output" in args:
+            click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+        if "error" in payload:
+            raise click.ClickException(payload["error"])
+        click.echo(f"factor_name: {payload['factor_name']}")
+        click.echo(f"factor_version_hash: {payload['factor_version_hash']}")
+        click.echo(f"as_of: {payload['as_of']}")
+        click.echo(f"source_run_id: {payload['source_run_id']}")
+        click.echo(f"source_verdict: {payload['source_verdict']}")
+        click.echo(f"lifecycle_state: {payload['lifecycle_state']}")
+        click.echo("target_weights:")
+        for symbol, weight in payload["target_weights"].items():
+            click.echo(f"  {symbol}: {weight:.6f}")
+        if payload["known_limitations"]:
+            click.echo("known_limitations:")
+            for finding in payload["known_limitations"]:
+                click.echo(f"  - {finding.get('severity')} [{finding.get('check')}]: {finding.get('message')}")
         return
     if command == "track":
         _factor_track(args[1:], store)

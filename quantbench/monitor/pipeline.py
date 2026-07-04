@@ -50,18 +50,18 @@ def _refresh_start_str(since_timestamp: Any) -> str:
     return start.strftime("%Y-%m-%d")
 
 
-def refresh_and_backtest(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_start: str) -> pd.Series:
+def _refresh_and_recompute(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_start: str) -> tuple[str, Any]:
     """Refreshes a single-symbol or cross-sectional run's data (from
     `refresh_start`, see _refresh_start_str, through today) and re-executes
-    its own compute() over the merged (historical + fresh) series, returning
-    the full net-return series (not sliced to "since creation" - callers
-    decide the window). Raises if the run has no signal.py (e.g. a portfolio
-    run) or is missing the config fields needed to know what to refresh.
-
-    Public (not prefixed with _) because it is the shared "refresh + recompute"
-    primitive for both decay monitoring (check_run_decay, below) and paper
-    tracking (quantbench/factors/paper_tracking.py).
-    """
+    its own compute() over the merged (historical + fresh) series. Returns a
+    ("cross_sectional", CrossSectionalBacktestResult) or ("single",
+    BacktestResult) tagged pair rather than unwrapping to just `.returns`, so
+    callers that need more than the return series (e.g. GAP 5.3 signal
+    export wants the cross-sectional path's `.weights`) don't have to
+    duplicate this refresh+recompute logic - refresh_and_backtest and
+    refresh_and_recompute_weights below both just unwrap what they need from
+    the same call. Raises if the run has no signal.py (e.g. a portfolio run)
+    or is missing the config fields needed to know what to refresh."""
     config = run_reader.read_config(run_id) or {}
     run_dir = run_reader.run_dir_for(run_id)
     signal_path = run_dir / "signal.py"
@@ -92,7 +92,7 @@ def refresh_and_backtest(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_s
         backtest = run_cross_sectional_backtest(
             panel, None, n_groups=_DEFAULT_N_GROUPS, cost_bps=DEFAULT_COST_BPS, factor_values=factor_values
         )
-        return backtest.returns
+        return "cross_sectional", backtest
 
     fetch_params = config.get("fetch_params") or {}
     symbol = fetch_params.get("symbol")
@@ -114,7 +114,40 @@ def refresh_and_backtest(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_s
     )
     signal = run_signal_code(code, merged)
     backtest = run_vectorized_backtest(merged, signal, cost_bps=DEFAULT_COST_BPS)
+    return "single", backtest
+
+
+def refresh_and_backtest(run_id: str, conn: duckdb.DuckDBPyConnection, refresh_start: str) -> pd.Series:
+    """Refreshes and recomputes run_id (see _refresh_and_recompute), returning
+    just the full net-return series (not sliced to "since creation" - callers
+    decide the window). Public (not prefixed with _) because it is the shared
+    "refresh + recompute" primitive for both decay monitoring (check_run_decay,
+    below) and paper tracking (quantbench/factors/paper_tracking.py)."""
+    _, backtest = _refresh_and_recompute(run_id, conn, refresh_start)
     return backtest.returns
+
+
+def refresh_and_recompute_weights(run_id: str, conn: duckdb.DuckDBPyConnection) -> pd.Series | None:
+    """Refreshes run_id's cross-sectional data through today and returns the
+    latest period's target weight vector (GAP 5.3 signal export). Returns
+    None for a single-symbol run - "target weights across a universe" isn't a
+    meaningful concept for a one-symbol position, so callers should surface a
+    structured "not supported for this factor" response rather than treating
+    this as an error.
+
+    refresh_start is computed the same way check_run_decay computes it (from
+    the run's own last known data point, via _refresh_start_str) rather than
+    from "today" - the goal is fresh current-day data, not a window starting
+    in the future, which would fetch nothing."""
+    original_returns = run_reader.read_returns_series(run_id)
+    if original_returns is not None and len(original_returns):
+        refresh_start = _refresh_start_str(original_returns.index.max())
+    else:
+        refresh_start = _refresh_start_str(pd.Timestamp.now(tz="UTC"))
+    kind, backtest = _refresh_and_recompute(run_id, conn, refresh_start)
+    if kind != "cross_sectional" or backtest.weights.empty:
+        return None
+    return backtest.weights.iloc[-1]
 
 
 def _check_portfolio_decay(

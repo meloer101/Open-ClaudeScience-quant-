@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from quantbench.agent.llm import record_llm_usage
 from quantbench.skills.registry import SkillRegistry
 
 
@@ -15,7 +16,13 @@ class SubAgent:
     output_schema: dict
 
 
-def run_subagent(llm, agent: SubAgent, user_payload: dict[str, Any]) -> dict[str, Any]:
+def run_subagent(
+    llm,
+    agent: SubAgent,
+    user_payload: dict[str, Any],
+    *,
+    usage_sink: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Runs a bounded LLM conversation for a named sub-agent role and returns
     its final answer parsed as JSON. Any tool calls the model makes along the
     way (if agent.registry has tools registered) are dispatched through
@@ -25,7 +32,12 @@ def run_subagent(llm, agent: SubAgent, user_payload: dict[str, Any]) -> dict[str
     failure - unlike the main coordinator loop, callers are expected to
     define their own role-specific fallback (e.g. run_critic's
     status="unavailable" CriticReport), since no single generic fallback
-    shape fits every sub-agent's output schema."""
+    shape fits every sub-agent's output schema.
+
+    usage_sink (GAP 5.4): pass ctx.llm_usage so this sub-agent's token/cost
+    footprint is visible in the manifest instead of vanishing - Critic and
+    the memory-consolidation agent both run through here and were previously
+    invisible to any cost accounting."""
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": agent.system_prompt},
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=str)},
@@ -33,6 +45,7 @@ def run_subagent(llm, agent: SubAgent, user_payload: dict[str, Any]) -> dict[str
 
     for _ in range(agent.max_turns):
         response = llm.chat(messages, tools=agent.registry.schemas())
+        record_llm_usage(response, getattr(llm, "model", "unknown"), usage_sink, step=f"subagent:{agent.name}")
         message = response.choices[0].message
         tool_calls = getattr(message, "tool_calls", None)
         if not tool_calls:

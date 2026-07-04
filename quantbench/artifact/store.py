@@ -87,6 +87,7 @@ class Run:
         turn_index: int | None = None,
         applied_memory_defaults: list[dict[str, Any]] | None = None,
         memory_events: list[dict[str, Any]] | None = None,
+        llm_usage: list[dict[str, Any]] | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -115,6 +116,7 @@ class Run:
             "turn_index": turn_index,
             "applied_memory_defaults": applied_memory_defaults or [],
             "memory_events": memory_events or [],
+            "llm_usage": llm_usage or [],
         }
         return self.save_json("manifest.json", manifest)
 

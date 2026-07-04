@@ -55,6 +55,10 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> ProviderRe
         df=download_ohlcv(symbol, timeframe, start, end),
         source=f"{name}_swap",
         adjustment=Adjustment(method="raw", dividend_reinvested=False),
+        # This provider only lists currently-active swap markets (GAP 1.2) -
+        # delisted perpetuals are absent, same limitation the crypto universe's
+        # survivorship_bias_note already documents.
+        covers_delisted=False,
     )
 
 

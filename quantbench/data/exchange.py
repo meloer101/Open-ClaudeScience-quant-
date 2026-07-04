@@ -46,11 +46,13 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> tuple[Path
         source = result.source
         adjustment = result.adjustment.to_dict() if result.adjustment else None
         fallback_error = None
+        covers_delisted = bool(result.covers_delisted)
     except Exception as exc:
         df = _synthetic_ohlcv(start, end, timeframe)
         source = SYNTHETIC_FALLBACK_SOURCE
         adjustment = {"method": "synthetic", "dividend_reinvested": False}
         fallback_error = f"{type(exc).__name__}: {exc}"
+        covers_delisted = False  # synthetic data makes no claim about delisted coverage
 
     df = normalize_ohlcv(df)
     write_parquet_quiet(df, cache_path)
@@ -67,10 +69,17 @@ def fetch_ohlcv(symbol: str, timeframe: str, start: str, end: str) -> tuple[Path
         "source": source,
         "adjustment": adjustment,
         "fallback_reason": fallback_error,
+        "covers_delisted": covers_delisted,
     }
     write_cache_meta(
         cache_path,
-        {"provider": provider.name, "source": source, "adjustment": adjustment, "fallback_reason": fallback_error},
+        {
+            "provider": provider.name,
+            "source": source,
+            "adjustment": adjustment,
+            "fallback_reason": fallback_error,
+            "covers_delisted": covers_delisted,
+        },
     )
     return cache_path, df, meta
 
