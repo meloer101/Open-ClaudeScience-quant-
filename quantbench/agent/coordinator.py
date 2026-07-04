@@ -1,7 +1,7 @@
 import json
 import math
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from quantbench.agent.execution_backend import get_execution_backend
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
@@ -497,40 +497,36 @@ def build_screen_factors_skill(ctx: _RunContext, run, run_store: ArtifactStore, 
         borrow_rates = _borrow_rates_for_panel(panel, borrow_config)
         neutralize_dims = _neutralize_dimensions(neutralize)
         sector = _sector_series(ctx.universe)
-        summary_items: list[dict[str, Any]] = []
-        max_workers = min(len(normalized), SCREEN_MAX_WORKERS)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(
-                    _run_screen_candidate,
-                    run_store,
-                    critic_llm,
-                    model,
-                    run.run_id,
-                    ctx.universe,
-                    panel,
-                    cache_meta,
-                    funding_rates,
-                    funding_meta,
-                    candidate,
-                    start,
-                    end,
-                    timeframe,
-                    n_groups,
-                    cost_bps,
-                    _execution_config(execution),
-                    liquidity_config,
-                    borrow_config,
-                    borrow_rates,
-                    neutralize_dims,
-                    sector,
-                    benchmark_returns,
-                    effective_trials,
-                )
-                for candidate in normalized
-            ]
-            for future in as_completed(futures):
-                summary_items.append(future.result())
+        execution_config = _execution_config(execution)
+
+        def _screen_one(candidate: dict[str, Any]) -> dict[str, Any]:
+            return _run_screen_candidate(
+                run_store,
+                critic_llm,
+                model,
+                run.run_id,
+                ctx.universe,
+                panel,
+                cache_meta,
+                funding_rates,
+                funding_meta,
+                candidate,
+                start,
+                end,
+                timeframe,
+                n_groups,
+                cost_bps,
+                execution_config,
+                liquidity_config,
+                borrow_config,
+                borrow_rates,
+                neutralize_dims,
+                sector,
+                benchmark_returns,
+                effective_trials,
+            )
+
+        summary_items = get_execution_backend().map(_screen_one, normalized, max_workers=SCREEN_MAX_WORKERS)
 
         # Second pass: now that every sibling candidate's Sharpe is known, the
         # DSR can finally use the *cross-trial* Sharpe dispersion (its whole

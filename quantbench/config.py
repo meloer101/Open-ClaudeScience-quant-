@@ -17,6 +17,11 @@ MAX_STEPS = 12
 SCREEN_MAX_CANDIDATES = 20
 SCREEN_MAX_WORKERS = 4
 
+# Execution backend for screen_factors fan-out: "local" (bounded ThreadPoolExecutor
+# on this machine) or "remote" (SSH/Modal offload - interface reserved, not implemented).
+# Switching to "remote" fails loudly rather than silently running locally.
+EXECUTION_BACKEND = os.environ.get("QUANTBENCH_EXECUTION_BACKEND", "local")
+
 # Risk parity (not max-sharpe) is the default: it never estimates expected
 # returns, only covariance, which is the more reliably-estimated of the two
 # inputs to portfolio optimization over a short factor-return history.
