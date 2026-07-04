@@ -47,6 +47,12 @@ def main(args: tuple[str, ...]) -> None:
     if args[0] == "universe":
         _universe(args[1:])
         return
+    if args[0] == "cache":
+        _cache(args[1:])
+        return
+    if args[0] == "eval":
+        _eval(args[1:])
+        return
     if args[0] == "literature":
         _literature(args[1:], forced_skills)
         return
@@ -297,8 +303,8 @@ def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:
         if "--json-output" in args:
             click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
             return
-        if "error" in payload:
-            raise click.ClickException(payload["error"])
+        if payload.get("status") == "unsupported":
+            raise click.ClickException(f"{payload['reason']}: {payload['message']} {payload['next_step']}")
         click.echo(f"factor_name: {payload['factor_name']}")
         click.echo(f"factor_version_hash: {payload['factor_version_hash']}")
         click.echo(f"as_of: {payload['as_of']}")
@@ -312,6 +318,7 @@ def _factor(args: tuple[str, ...], forced_skills: list[str]) -> None:
             click.echo("known_limitations:")
             for finding in payload["known_limitations"]:
                 click.echo(f"  - {finding.get('severity')} [{finding.get('check')}]: {finding.get('message')}")
+        click.echo(f"risk_disclaimer: {payload['risk_disclaimer']}")
         return
     if command == "track":
         _factor_track(args[1:], store)
@@ -391,6 +398,59 @@ def _universe(args: tuple[str, ...]) -> None:
 
     written = record_crypto_universe_snapshot(get_connection(), as_of_date, quote=quote, limit=limit)
     click.echo(f"Snapshotted {written} {quote} perpetual symbol(s) for {as_of_date}.")
+
+
+def _cache(args: tuple[str, ...]) -> None:
+    if len(args) < 2 or args[0] != "audit":
+        raise click.UsageError("cache requires a subcommand: audit <run_id>")
+    from quantbench.data.retention import audit_run_data_retention
+
+    report = audit_run_data_retention(args[1])
+    if "--json-output" in args:
+        click.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    click.echo(f"status: {report['status']}")
+    click.echo(f"slices_checked: {report['slices_checked']}/{report['slices_total']}")
+    if report["missing"]:
+        click.echo("missing:")
+        for path in report["missing"]:
+            click.echo(f"  - {path}")
+    if report["drifted"]:
+        click.echo("drifted:")
+        for item in report["drifted"]:
+            click.echo(f"  - {item}")
+    if report["status"] == "failed":
+        raise click.ClickException("data retention audit failed")
+
+
+def _eval(args: tuple[str, ...]) -> None:
+    if not args or args[0] != "llm":
+        raise click.UsageError("eval requires a subcommand: llm --cases <path>")
+    from pathlib import Path
+
+    from quantbench.agent.llm import LLMClient
+    from quantbench.config import DEFAULT_MODEL
+    from quantbench.evals.llm_eval import run_llm_cases
+
+    cases = _option_value(args[1:], "--cases")
+    if not cases:
+        raise click.UsageError("eval llm requires --cases")
+    class _ClientAdapter:
+        def __init__(self, model: str):
+            self.client = LLMClient(model)
+
+        def complete(self, messages: list[dict]) -> str:
+            response = self.client.chat(messages)
+            return str(response.choices[0].message.content or "")
+
+    results = run_llm_cases(Path(cases), _ClientAdapter(DEFAULT_MODEL))
+    payload = [
+        {"name": result.name, "passed": result.passed, "required_findings": result.required_findings}
+        for result in results
+    ]
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    if not all(result.passed for result in results):
+        raise click.ClickException("LLM eval failed")
 
 
 def _literature(args: tuple[str, ...], forced_skills: list[str] | None = None) -> None:

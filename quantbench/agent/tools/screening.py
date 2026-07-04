@@ -223,6 +223,7 @@ def _run_screen_candidate(
             ic_significance=backtest.ic_significance,
             mcp_calls=ctx.mcp_calls,
             execution=execution.to_dict(),
+            universe=universe.to_dict(),
         )
         ctx.review_report = review_report
         child.save_json("review_report.json", review_report.to_dict())

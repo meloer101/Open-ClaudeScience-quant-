@@ -17,6 +17,7 @@ from quantbench.review.parameter_stability import ParameterStabilityResult, run_
 from quantbench.review.regime import yearly_return_contribution
 from quantbench.review.symbol_concentration import symbol_concentration_from_factor_panel
 from quantbench.review.tail_dependence import MAX_BEST_DAYS, best_days_contribution_share
+from quantbench.review.trust_policy import assess_universe_trust
 from quantbench.review.walk_forward import WalkForwardResult, run_walk_forward
 from quantbench.engine.metrics import ICSignificance, ic_newey_west, periods_per_year_from_timestamps
 
@@ -121,8 +122,10 @@ def run_review(
     ic_significance: ICSignificance | dict[str, Any] | None = None,
     mcp_calls: list[dict[str, Any]] | None = None,
     execution: dict[str, Any] | None = None,
+    universe: dict[str, Any] | None = None,
 ) -> ReviewReport:
     findings: list[ReviewFinding] = []
+    findings.append(_trust_policy_finding(universe))
     findings.extend(_safe("lookahead", lambda: _lookahead_findings(code)))
     findings.extend(_safe("out_of_sample", lambda: [_oos_finding(run_out_of_sample_check(out_of_sample_data, run_on_data))]))
     findings.extend(_safe("cost_sensitivity", lambda: [_cost_finding(run_cost_sensitivity_check(cost_bps, rerun_at_cost))]))
@@ -157,6 +160,16 @@ def run_review(
         findings.append(_execution_assumption_finding(execution))
     verdict, reason = determine_verdict(findings)
     return ReviewReport(findings=findings, verdict=verdict, verdict_reason=reason)
+
+
+def _trust_policy_finding(universe: dict[str, Any] | None) -> ReviewFinding:
+    assessment = assess_universe_trust(universe)
+    return ReviewFinding(
+        "launch_trust_policy",
+        assessment.severity,
+        assessment.message,
+        {"tier": assessment.tier, **assessment.detail},
+    )
 
 
 def _safe(check: str, fn: Callable[[], list[ReviewFinding]]) -> list[ReviewFinding]:

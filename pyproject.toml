@@ -50,3 +50,7 @@ testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["quantbench"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"quantbench/data/seeds/crypto_universe_snapshots.json" = "quantbench/data/seeds/crypto_universe_snapshots.json"
+"quantbench/evals/llm_cases.yaml" = "quantbench/evals/llm_cases.yaml"
