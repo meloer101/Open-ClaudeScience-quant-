@@ -85,6 +85,7 @@ class Run:
         staging: dict[str, Any] | None = None,
         session_id: str | None = None,
         turn_index: int | None = None,
+        applied_memory_defaults: list[dict[str, Any]] | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -111,6 +112,7 @@ class Run:
             "staging": staging,
             "session_id": session_id,
             "turn_index": turn_index,
+            "applied_memory_defaults": applied_memory_defaults or [],
         }
         return self.save_json("manifest.json", manifest)
 

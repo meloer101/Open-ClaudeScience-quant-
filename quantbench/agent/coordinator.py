@@ -29,10 +29,13 @@ from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.review import run_review
 from quantbench.factors.parametrize import apply_overrides
 from quantbench.factors.store import FactorStore
-from quantbench.agent.staging import CostEstimate, StagingGate
+from quantbench.agent.staging import CostEstimate, StagingGate, StagingPolicy
 from quantbench.library.aggregate import summarize as summarize_library
 from quantbench.library.fork import build_fork_config
 from quantbench.library.index import ExperimentIndex
+from quantbench.memory.defaults import apply_memory_defaults, merge_applied_memory_defaults
+from quantbench.memory.inject import build_memory_augmented_system_prompt
+from quantbench.memory.store import UserMemoryStore
 from quantbench.library.trials import count_trials, universe_signature
 from quantbench.skilldocs.inject import build_augmented_system_prompt
 from quantbench.skilldocs.registry import SkillRegistryDocs
@@ -229,14 +232,8 @@ def build_run_cross_sectional_backtest_skill(ctx: _RunContext, run) -> Skill:
             )
 
         factor_values = run_signal_code_panel(code, panel, usage_sink=ctx.sandbox_usage)
-        staged = StagingGate(
-            run_id=run.run_id,
-            run_dir=run.run_dir,
-            confirm_callback=ctx.staging_confirm,
-        ).review(
-            code=code,
-            factor_values=factor_values,
-            config={
+        config, applied_defaults = apply_memory_defaults(
+            {
                 "start": start,
                 "end": end,
                 "timeframe": timeframe,
@@ -247,6 +244,18 @@ def build_run_cross_sectional_backtest_skill(ctx: _RunContext, run) -> Skill:
                 "borrow_cost": borrow_cost,
                 "neutralize": neutralize,
             },
+            ctx.memory_default_facts,
+        )
+        ctx.applied_memory_defaults = merge_applied_memory_defaults(ctx.applied_memory_defaults, applied_defaults)
+        staged = StagingGate(
+            run_id=run.run_id,
+            run_dir=run.run_dir,
+            policy=StagingPolicy(force_stage=bool(applied_defaults)),
+            confirm_callback=ctx.staging_confirm,
+        ).review(
+            code=code,
+            factor_values=factor_values,
+            config=config,
             cost=CostEstimate(
                 kind="cross_sectional",
                 observations=len(panel),
@@ -673,6 +682,7 @@ class Coordinator:
         run_store: ArtifactStore | None = None,
         llm: LLMClient | None = None,
         critic_llm: LLMClient | None = None,
+        memory_store: UserMemoryStore | None = None,
     ):
         self.model = model or DEFAULT_MODEL
         self.run_store = run_store or ArtifactStore(RUNS_DIR)
@@ -680,6 +690,7 @@ class Coordinator:
         self.critic_llm = critic_llm or LLMClient(CRITIC_MODEL)
         self.critic_model = str(getattr(self.critic_llm, "model", CRITIC_MODEL))
         self._mcp_configs = load_mcp_config(MCP_SERVERS_CONFIG)
+        self.memory_store = memory_store or UserMemoryStore()
 
     def run(self, user_request: str, *, skill_names: list[str] | None = None) -> RunResult:
         run = self.run_store.create_run(user_request)
@@ -804,6 +815,7 @@ class Coordinator:
 
         ctx = _RunContext()
         ctx.staging_confirm = staging_confirm
+        ctx.memory_default_facts = self.memory_store.default_facts()
         mcp_manager = MCPClientManager(self._mcp_configs, ctx) if self._mcp_configs else None
 
         def fork_previous_run(parent_run_id: str, modification: str) -> str:
@@ -822,6 +834,7 @@ class Coordinator:
         matched_skills = _select_skill_docs(user_request, skill_names)
         ctx.injected_skills = [skill.name for skill in matched_skills]
         system_prompt = build_augmented_system_prompt(SYSTEM_PROMPT, matched_skills)
+        system_prompt = build_memory_augmented_system_prompt(system_prompt, self.memory_store)
         user_content = prompt_override or user_request
         if session_context:
             user_content = f"{session_context}\n\n当前用户请求：\n{user_content}"
@@ -873,6 +886,7 @@ class Coordinator:
             "factor_metadata": _factor_metadata(ctx.signal_code or "", factor_observations),
             "session_id": session_id,
             "turn_index": turn_index,
+            "applied_memory_defaults": ctx.applied_memory_defaults,
         }
         run.save_config(config)
 
@@ -936,6 +950,7 @@ class Coordinator:
             staging=ctx.staging,
             session_id=session_id,
             turn_index=turn_index,
+            applied_memory_defaults=ctx.applied_memory_defaults,
         )
         if mcp_manager is not None:
             mcp_manager.close()
@@ -989,6 +1004,7 @@ class Coordinator:
             "library_question": True,
             "session_id": session_id,
             "turn_index": turn_index,
+            "applied_memory_defaults": [],
         }
         run.save_config(config)
         run.save_json("library_summary.json", rows)
@@ -1016,6 +1032,7 @@ class Coordinator:
             review=None,
             session_id=session_id,
             turn_index=turn_index,
+            applied_memory_defaults=[],
         )
         return RunResult(run_id=run.run_id, run_dir=run.run_dir, metrics={}, warnings=[], summary=summary)
 

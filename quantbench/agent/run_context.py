@@ -62,3 +62,5 @@ class _RunContext:
         self.mcp_calls: list[dict[str, Any]] = []
         self.staging: dict[str, Any] | None = None
         self.staging_confirm = None
+        self.memory_default_facts: list[Any] = []
+        self.applied_memory_defaults: list[dict[str, Any]] = []
