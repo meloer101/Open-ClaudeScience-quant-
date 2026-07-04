@@ -1,4 +1,4 @@
-export type RunStatus = "running" | "completed" | "failed" | "cancelled";
+export type RunStatus = "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
 
 export type ArtifactKind =
   | "image"
@@ -41,6 +41,34 @@ export interface RunDetail {
   warnings: string[];
   artifacts: ArtifactInfo[];
   error: string | null;
+  staging: StagingArtifact | null;
+}
+
+export interface StagingArtifact {
+  factor_spec?: {
+    natural_language_definition?: string;
+    formula?: string;
+    code?: string;
+  };
+  validation_report?: {
+    lookahead_issues?: Array<{ pattern?: string; detail?: string; line?: number | null }>;
+    has_shift?: boolean;
+    input_columns?: string[];
+    nan_ratio?: number;
+    coverage_ratio?: number;
+    output_aligned?: boolean;
+    sample_head?: Record<string, unknown>[];
+    sample_tail?: Record<string, unknown>[];
+    data_quality?: Record<string, unknown>;
+  };
+  gate_decision?: {
+    decision?: string;
+    risk_score?: number;
+    cost_score?: number;
+    reasons?: string[];
+  };
+  overrides?: Record<string, unknown>;
+  staged_diff?: Record<string, unknown>;
 }
 
 export interface ExperimentRecord {
@@ -180,6 +208,7 @@ export type RunEvent =
   | { type: "start" }
   | { type: "tool_start"; tool: string; args: Record<string, unknown> }
   | { type: "tool_end"; tool: string; result: unknown }
+  | { type: "staging"; artifact: StagingArtifact; config: Record<string, unknown> }
   | { type: "final"; summary: string }
   | { type: "cancelled" }
   | { type: "error"; message: string };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listRuns, createRun, getRun, listLibrary, cancelRun } from "./api/client";
+import { listRuns, createRun, getRun, listLibrary, cancelRun, confirmStaging } from "./api/client";
 import { useRunEvents } from "./hooks/useRunEvents";
 import { Sidebar } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
@@ -89,10 +89,10 @@ function App() {
     queryKey: ["run", activeRunId],
     queryFn: () => getRun(activeRunId!),
     enabled: Boolean(activeRunId),
-    refetchInterval: (query) => (query.state.data?.status === "running" ? 1000 : false),
+    refetchInterval: (query) => (query.state.data?.status === "running" || query.state.data?.status === "awaiting_confirmation" ? 1000 : false),
   });
 
-  const liveEvents = useRunEvents(activeRunId, currentRun?.status === "running");
+  const liveEvents = useRunEvents(activeRunId, currentRun?.status === "running" || currentRun?.status === "awaiting_confirmation");
 
   const sessionTabs: SessionTab[] = openTabs.map((id) => {
     if (id === DRAFT_ID) {
@@ -200,6 +200,13 @@ function App() {
     await queryClient.invalidateQueries({ queryKey: ["library"] });
   };
 
+  const handleConfirmStaging = async (overrides: Record<string, unknown>) => {
+    if (!activeRunId) return;
+    await confirmStaging(activeRunId, overrides);
+    await queryClient.invalidateQueries({ queryKey: ["run", activeRunId] });
+    await queryClient.invalidateQueries({ queryKey: ["runs"] });
+  };
+
   const handleForked = async (runId: string) => {
     openRunTab(runId);
     await queryClient.invalidateQueries({ queryKey: ["runs"] });
@@ -240,8 +247,9 @@ function App() {
             onOpenCharts={handleOpenCharts}
             isChartsSelected={activeArtifactKey === (activeRunId ? artifactKey(activeRunId, CHARTS_FILENAME) : null)}
             onSubmit={handleSubmit}
-            isRunning={currentRun?.status === "running"}
+            isRunning={currentRun?.status === "running" || currentRun?.status === "awaiting_confirmation"}
             onStop={() => void handleStop()}
+            onConfirmStaging={handleConfirmStaging}
             compareRunIds={compareRunIds}
             onClearCompare={() => setCompareRunIds([])}
             onForked={handleForked}

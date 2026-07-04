@@ -72,6 +72,13 @@ export function cancelRun(runId: string): Promise<{ status: string }> {
   return request(`/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
 }
 
+export function confirmStaging(runId: string, overrides: Record<string, unknown>): Promise<{ status: string }> {
+  return request(`/runs/${encodeURIComponent(runId)}/staging/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ overrides }),
+  });
+}
+
 export function forkRun(runId: string, modification: string): Promise<{ run_id: string; status: string }> {
   return request(`/runs/${encodeURIComponent(runId)}/fork`, {
     method: "POST",

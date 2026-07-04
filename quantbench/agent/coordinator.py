@@ -29,6 +29,7 @@ from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.review import run_review
 from quantbench.factors.parametrize import apply_overrides
 from quantbench.factors.store import FactorStore
+from quantbench.agent.staging import CostEstimate, StagingGate
 from quantbench.library.aggregate import summarize as summarize_library
 from quantbench.library.fork import build_fork_config
 from quantbench.library.index import ExperimentIndex
@@ -227,13 +228,50 @@ def build_run_cross_sectional_backtest_skill(ctx: _RunContext, run) -> Skill:
                 f"{len(ctx.data_quality.suspicious_price_jumps)} symbols have >50% one-period price jumps."
             )
 
+        factor_values = run_signal_code_panel(code, panel, usage_sink=ctx.sandbox_usage)
+        staged = StagingGate(
+            run_id=run.run_id,
+            run_dir=run.run_dir,
+            confirm_callback=ctx.staging_confirm,
+        ).review(
+            code=code,
+            factor_values=factor_values,
+            config={
+                "start": start,
+                "end": end,
+                "timeframe": timeframe,
+                "n_groups": n_groups,
+                "cost_bps": cost_bps,
+                "execution": execution,
+                "liquidity_cost": liquidity_cost,
+                "borrow_cost": borrow_cost,
+                "neutralize": neutralize,
+            },
+            cost=CostEstimate(
+                kind="cross_sectional",
+                observations=len(panel),
+                symbols=panel["symbol"].nunique() if "symbol" in panel.columns else None,
+            ),
+            hypothesis="cross-sectional factor",
+            available_columns=list(panel.columns),
+            data_quality=ctx.data_quality,
+        )
+        ctx.staging = staged.artifact
+        code = staged.code
+        n_groups = staged.config.get("n_groups", n_groups)
+        cost_bps = staged.config.get("cost_bps", cost_bps)
+        execution = staged.config.get("execution", execution)
+        liquidity_cost = staged.config.get("liquidity_cost", liquidity_cost)
+        borrow_cost = staged.config.get("borrow_cost", borrow_cost)
+        neutralize = staged.config.get("neutralize", neutralize)
+        if staged.code_changed:
+            factor_values = run_signal_code_panel(code, panel, usage_sink=ctx.sandbox_usage)
         execution_config = _execution_config(execution)
         liquidity_config = _liquidity_cost_config(liquidity_cost)
         borrow_config = _borrow_cost_config(borrow_cost)
         borrow_rates = _borrow_rates_for_panel(panel, borrow_config)
         neutralize_dims = _neutralize_dimensions(neutralize)
         sector = _sector_series(ctx.universe)
-        factor_values = run_signal_code_panel(code, panel, usage_sink=ctx.sandbox_usage)
         backtest = run_cross_sectional_backtest(
             panel,
             None,
@@ -702,6 +740,7 @@ class Coordinator:
         derived_from_factor: str | None = None,
         prompt_override: str | None = None,
         cancel_event: threading.Event | None = None,
+        staging_confirm: Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any] | None] | None = None,
     ) -> RunResult:
         """Drive the tool-use loop for an already-created Run.
 
@@ -735,6 +774,7 @@ class Coordinator:
             return self._execute_library_question(run, user_request, emit)
 
         ctx = _RunContext()
+        ctx.staging_confirm = staging_confirm
         mcp_manager = MCPClientManager(self._mcp_configs, ctx) if self._mcp_configs else None
         registry = _build_registry(ctx, run, self.run_store, self.critic_llm, self.model, mcp_manager)
         matched_skills = _select_skill_docs(user_request, skill_names)
@@ -846,6 +886,7 @@ class Coordinator:
             delegations=ctx.delegations,
             sandbox_usage=[asdict(item) for item in ctx.sandbox_usage],
             mcp_calls=ctx.mcp_calls,
+            staging=ctx.staging,
         )
         if mcp_manager is not None:
             mcp_manager.close()

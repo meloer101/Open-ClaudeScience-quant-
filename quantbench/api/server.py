@@ -17,6 +17,7 @@ from quantbench.api.schemas import (
     NewRunResponse,
     RunDetail,
     RunSummary,
+    StagingConfirmRequest,
     StatusResponse,
 )
 from quantbench.library.aggregate import summarize
@@ -132,6 +133,7 @@ def get_run(run_id: str) -> RunDetail:
         warnings=manifest.get("warnings", []),
         artifacts=[ArtifactInfo(**item) for item in run_reader.list_artifacts(run_id)],
         error=run_reader.read_error(run_id) if status == "failed" else None,
+        staging=run_reader.read_staging(run_id),
     )
 
 
@@ -141,6 +143,19 @@ def get_run_status(run_id: str) -> StatusResponse:
         return StatusResponse(status=run_reader.get_status(run_id))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="run not found") from None
+
+
+@app.post("/api/runs/{run_id}/staging/confirm", response_model=StatusResponse)
+def confirm_staging(run_id: str, payload: StagingConfirmRequest) -> StatusResponse:
+    try:
+        status = run_reader.get_status(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="run not found") from None
+    if status != "awaiting_confirmation":
+        return StatusResponse(status=status)
+    if not _manager.confirm_staging(run_id, payload.overrides):
+        raise HTTPException(status_code=409, detail="run is not waiting for confirmation in this process")
+    return StatusResponse(status="running")
 
 
 @app.get("/api/runs/{run_id}/events")

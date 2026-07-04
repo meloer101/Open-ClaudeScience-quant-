@@ -36,6 +36,8 @@ class RunManager:
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._queues: dict[str, queue.Queue] = {}
         self._cancel_events: dict[str, threading.Event] = {}
+        self._staging_waiters: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     def _run_task(self, run, event_queue: queue.Queue, work: Any) -> None:
         cancel_event = self._cancel_events[run.run_id]
@@ -65,7 +67,16 @@ class RunManager:
                 event_queue.put(_STREAM_END)
 
         def work(cancel_event: threading.Event) -> None:
-            coordinator.execute(run, user_request, on_event=on_event, cancel_event=cancel_event)
+            def staging_confirm(run_id: str, artifact: dict[str, Any], config: dict[str, Any]) -> dict[str, Any] | None:
+                return self._await_staging_confirmation(run_id, event_queue, cancel_event, artifact, config)
+
+            coordinator.execute(
+                run,
+                user_request,
+                on_event=on_event,
+                cancel_event=cancel_event,
+                staging_confirm=staging_confirm,
+            )
 
         self._executor.submit(self._run_task, run, event_queue, work)
         return run.run_id
@@ -96,6 +107,10 @@ class RunManager:
         if cancel_event is None:
             return False
         cancel_event.set()
+        with self._lock:
+            waiter = self._staging_waiters.get(run_id)
+            if waiter is not None:
+                waiter["event"].set()
         return True
 
     def cancel_all(self) -> None:
@@ -104,6 +119,39 @@ class RunManager:
         while the process tries to exit."""
         for cancel_event in self._cancel_events.values():
             cancel_event.set()
+
+    def confirm_staging(self, run_id: str, overrides: dict[str, Any]) -> bool:
+        with self._lock:
+            waiter = self._staging_waiters.get(run_id)
+            if waiter is None:
+                return False
+            waiter["overrides"] = overrides
+            waiter["event"].set()
+            return True
+
+    def _await_staging_confirmation(
+        self,
+        run_id: str,
+        event_queue: queue.Queue,
+        cancel_event: threading.Event,
+        artifact: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        event = threading.Event()
+        waiter = {"event": event, "overrides": None}
+        with self._lock:
+            self._staging_waiters[run_id] = waiter
+        event_queue.put({"type": "staging", "artifact": artifact, "config": config})
+        try:
+            while not event.wait(timeout=0.1):
+                if cancel_event.is_set():
+                    raise RunCancelled(run_id)
+            if cancel_event.is_set():
+                raise RunCancelled(run_id)
+            return waiter.get("overrides") or {}
+        finally:
+            with self._lock:
+                self._staging_waiters.pop(run_id, None)
 
     def has_live_stream(self, run_id: str) -> bool:
         return run_id in self._queues

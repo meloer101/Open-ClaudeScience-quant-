@@ -27,6 +27,7 @@ class RunDetail(BaseModel):
     warnings: list[str]
     artifacts: list[ArtifactInfo]
     error: str | None = None
+    staging: dict | None = None
 
 
 class NewRunRequest(BaseModel):
@@ -40,6 +41,10 @@ class NewRunResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str
+
+
+class StagingConfirmRequest(BaseModel):
+    overrides: dict = {}
 
 
 class ExperimentRecordSchema(BaseModel):

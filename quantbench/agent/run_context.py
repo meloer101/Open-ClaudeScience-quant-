@@ -60,3 +60,5 @@ class _RunContext:
         self.delegations: list[dict[str, Any]] = []
         self.sandbox_usage: list[Any] = []
         self.mcp_calls: list[dict[str, Any]] = []
+        self.staging: dict[str, Any] | None = None
+        self.staging_confirm = None

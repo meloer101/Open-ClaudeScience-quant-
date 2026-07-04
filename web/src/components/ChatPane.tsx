@@ -17,6 +17,7 @@ interface ChatPaneProps {
   onSubmit: (request: string) => Promise<void>;
   isRunning?: boolean;
   onStop?: () => void;
+  onConfirmStaging: (overrides: Record<string, unknown>) => Promise<void>;
   compareRunIds: string[];
   onClearCompare: () => void;
   onForked: (runId: string) => void;
@@ -34,6 +35,7 @@ export function ChatPane({
   onSubmit,
   isRunning,
   onStop,
+  onConfirmStaging,
   compareRunIds,
   onClearCompare,
   onForked,
@@ -60,6 +62,7 @@ export function ChatPane({
               onSelectArtifact={onSelectArtifact}
               onOpenCharts={onOpenCharts}
               isChartsSelected={isChartsSelected}
+              onConfirmStaging={onConfirmStaging}
             />
             <RunLineage runId={run.run_id} />
             {run.status === "completed" && <ForkRunForm runId={run.run_id} onForked={onForked} />}

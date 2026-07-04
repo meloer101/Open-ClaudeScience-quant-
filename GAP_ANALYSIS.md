@@ -181,14 +181,16 @@
 - [ ] Web 端从"提交 run 表单"演进为"对话流 + 内嵌 run 卡片"。
 - [ ] Session 本身成为 artifact 的一部分（Claude Science：溯源包含对话历史）。
 
-### 4.2 计划确认环节（human-in-the-loop）（优先级：🟡 中）
+### 4.2 执行前审查台（human-in-the-loop）（优先级：🟡 中）
 
-**现状**：VISION 5.1 设计了 Coordinator 生成计划后暂停确认（"数据范围？手续费假设？"），当前实现直接执行。
+**现状**：已落地执行前 staging gate（见 [PHASE13B_HITL_STAGING.md](PHASE13B_HITL_STAGING.md)）。单资产和截面路径会先运行一次便宜 `compute()` 与静态检查，生成 `factor_spec` + `validation_report`；策略函数按静态风险 × 下一步成本决定自动放行或进入 `awaiting_confirmation`。API/Web 可确认并提交 code/config overrides，manifest 记录 `staging` 与 `staged_diff`。
 
 **缺什么**：
-- [ ] Coordinator 两阶段模式：先输出结构化研究计划（步骤、数据需求、默认假设、预计耗时），等用户确认/修改后再执行。
-- [ ] CLI 用交互式 y/n + 参数覆盖；Web 用计划卡片 + 编辑确认。
-- [ ] 计划与实际执行的 diff 记入 manifest（审计"模型说要做什么 vs 实际做了什么"）。
+- [x] 执行前 artifact review：factor definition / formula / `compute()` / validation report 在昂贵回测前可见、可改、可审计。
+- [x] API/Web 确认流：`awaiting_confirmation` + `/api/runs/{id}/staging/confirm` + Web 审查台卡片。
+- [x] 审计：manifest `staging` 段记录原始 artifact、用户 overrides 与 staged diff。
+- [ ] 后续增强：完整 plan-first 对象（数据需求、步骤、预计耗时）可作为 staging 的上游 artifact，但不再替代 code/config 层审查。
+- [ ] CLI 更完整的交互式编辑体验（当前非交互脚本维持默认策略/自动放行，避免回归）。
 
 ### 4.3 文献接入：论文 → 假设来源（优先级：🟠 中低，但差异化价值高）
 

@@ -1,7 +1,7 @@
 export interface SessionTab {
   id: string; // real run_id, or "draft" for a new unsubmitted session
   label: string;
-  status: "running" | "completed" | "failed" | "cancelled" | "draft";
+  status: "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled" | "draft";
 }
 
 interface SessionTabBarProps {
@@ -24,7 +24,9 @@ export function SessionTabBar({ tabs, activeId, onSelect, onClose }: SessionTabB
             tab.id === activeId ? "bg-warm-100 text-warm-900" : "text-warm-500 hover:bg-warm-100/60"
           }`}
         >
-          {tab.status === "running" && <span className="w-1.5 h-1.5 rounded-full bg-warn-200 animate-pulse shrink-0" />}
+          {(tab.status === "running" || tab.status === "awaiting_confirmation") && (
+            <span className="w-1.5 h-1.5 rounded-full bg-warn-200 animate-pulse shrink-0" />
+          )}
           <span className="truncate">{tab.label}</span>
           <button
             onClick={(event) => {

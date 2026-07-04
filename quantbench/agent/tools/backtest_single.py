@@ -12,6 +12,7 @@ from quantbench.config import DEFAULT_COST_BPS
 from quantbench.engine.metrics import sanity_check_metrics
 from quantbench.engine.vectorized_backtest import run_vectorized_backtest
 from quantbench.review import run_review
+from quantbench.agent.staging import CostEstimate, StagingGate
 from quantbench.skills.codeexec import run_signal_code
 from quantbench.skills.plot import save_drawdown_plot, save_equity_curve_plot
 from quantbench.skills.registry import Skill
@@ -28,7 +29,25 @@ def build_run_signal_backtest_skill(ctx: _RunContext, run) -> Skill:
         if ctx.data_df is None:
             return {"error": "no market data loaded yet - call fetch_ohlcv first"}
 
-        signal = run_signal_code(code, ctx.data_df)
+        signal = run_signal_code(code, ctx.data_df, usage_sink=ctx.sandbox_usage)
+        staged = StagingGate(
+            run_id=run.run_id,
+            run_dir=run.run_dir,
+            confirm_callback=ctx.staging_confirm,
+        ).review(
+            code=code,
+            factor_values=signal,
+            config={"cost_bps": cost_bps, "execution": execution},
+            cost=CostEstimate(kind="single", observations=len(ctx.data_df)),
+            hypothesis="single-asset signal",
+            available_columns=list(ctx.data_df.columns),
+        )
+        ctx.staging = staged.artifact
+        code = staged.code
+        cost_bps = staged.config.get("cost_bps", cost_bps)
+        execution = staged.config.get("execution", execution)
+        if staged.code_changed:
+            signal = run_signal_code(code, ctx.data_df, usage_sink=ctx.sandbox_usage)
         execution_config = _execution_config(execution)
         backtest = run_vectorized_backtest(ctx.data_df, signal, cost_bps=cost_bps, execution=execution_config)
 

@@ -46,7 +46,15 @@ ARTIFACT_KIND_BY_EXT = {
 }
 
 # Internal bookkeeping files, not shown as user-facing generated artifacts.
-_HIDDEN_FILES = {"manifest.json", "config.yaml", "conversation.json", "error.json", "cancelled.json", "request.txt"}
+_HIDDEN_FILES = {
+    "manifest.json",
+    "config.yaml",
+    "conversation.json",
+    "error.json",
+    "cancelled.json",
+    "request.txt",
+    "staging_pending.json",
+}
 
 
 def list_run_ids() -> list[str]:
@@ -72,6 +80,8 @@ def get_status(run_id: str) -> str:
         return "cancelled"
     if (run_dir / "error.json").exists():
         return "failed"
+    if (run_dir / "staging_pending.json").exists():
+        return "awaiting_confirmation"
     return "running"
 
 
@@ -92,6 +102,16 @@ def read_manifest(run_id: str) -> dict[str, Any] | None:
     if not manifest.get("metrics"):
         manifest["metrics"] = _derive_metrics(manifest)
     return manifest
+
+
+def read_staging(run_id: str) -> dict[str, Any] | None:
+    manifest = read_manifest(run_id)
+    if manifest and manifest.get("staging"):
+        return manifest["staging"]
+    path = run_dir_for(run_id) / "staging_pending.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _derive_summary(run_id: str, manifest: dict[str, Any]) -> str:

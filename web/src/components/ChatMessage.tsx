@@ -5,6 +5,7 @@ import { ArtifactGallery } from "./ArtifactGallery";
 import { LiveProgress } from "./LiveProgress";
 import { MonitoringPanel } from "./MonitoringPanel";
 import { PortfolioSummaryPanel } from "./PortfolioSummaryPanel";
+import { StagingReviewPanel } from "./StagingReviewPanel";
 
 interface ChatMessageProps {
   run: RunDetail;
@@ -13,6 +14,7 @@ interface ChatMessageProps {
   onSelectArtifact: (filename: string) => void;
   onOpenCharts?: () => void;
   isChartsSelected?: boolean;
+  onConfirmStaging: (overrides: Record<string, unknown>) => Promise<void>;
 }
 
 function MetricsTable({ metrics }: { metrics: Record<string, number> }) {
@@ -42,7 +44,15 @@ function MetricsTable({ metrics }: { metrics: Record<string, number> }) {
 // the backend fallback exists to support.
 const LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME = "cross_sectional_backtest_result.json";
 
-export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifact, onOpenCharts, isChartsSelected }: ChatMessageProps) {
+export function ChatMessage({
+  run,
+  liveEvents,
+  selectedFilename,
+  onSelectArtifact,
+  onOpenCharts,
+  isChartsSelected,
+  onConfirmStaging,
+}: ChatMessageProps) {
   const hasBacktestResult = run.artifacts.some(
     (artifact) =>
       artifact.filename === "backtest_result.json" || artifact.filename === LEGACY_CROSS_SECTIONAL_BACKTEST_RESULT_FILENAME,
@@ -58,6 +68,9 @@ export function ChatMessage({ run, liveEvents, selectedFilename, onSelectArtifac
 
       <div className="max-w-3xl">
         {run.status === "running" && <LiveProgress events={liveEvents} />}
+        {run.status === "awaiting_confirmation" && run.staging && (
+          <StagingReviewPanel artifact={run.staging} isAwaiting={true} onConfirm={onConfirmStaging} />
+        )}
         {run.status === "cancelled" && (
           <div className="border border-warm-200 bg-warm-50 rounded-xl p-3 text-sm text-warm-600">已停止</div>
         )}

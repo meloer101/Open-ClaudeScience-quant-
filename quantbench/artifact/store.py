@@ -82,6 +82,7 @@ class Run:
         delegations: list[dict[str, Any]] | None = None,
         sandbox_usage: list[dict[str, Any]] | None = None,
         mcp_calls: list[dict[str, Any]] | None = None,
+        staging: dict[str, Any] | None = None,
     ) -> Path:
         manifest = {
             "run_id": self.run_id,
@@ -105,6 +106,7 @@ class Run:
             "delegations": delegations or [],
             "sandbox_usage": sandbox_usage or [],
             "mcp_calls": mcp_calls or [],
+            "staging": staging,
         }
         return self.save_json("manifest.json", manifest)
 
