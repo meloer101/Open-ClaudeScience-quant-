@@ -107,6 +107,12 @@ QuantBench 的运行时状态默认写入 `~/.quantbench/`：
 
 如需把状态目录放到别处，设置 `QUANTBENCH_HOME=/path/to/quantbench-home`。
 
+### Prerequisites
+
+- `uv`
+- Node.js 22+
+- A DeepSeek-compatible API key configured for LiteLLM when running new AI requests
+
 安装 Python 依赖：
 
 ```bash
@@ -118,6 +124,24 @@ uv sync
 ```bash
 uv run quantbench --help
 ```
+
+首次打开前先写入一个 deterministic 示例 run：
+
+```bash
+uv run python -m quantbench examples seed
+```
+
+一条命令启动本地 API 和 Web 工作台：
+
+```bash
+uv run python -m quantbench serve
+```
+
+Open the printed Web URL. The command binds the API to `127.0.0.1` and creates a local API token for the Web session.
+
+New natural-language runs may call the Coordinator and Critic LLMs. The composer shows a deterministic preflight token/cost estimate before submission; actual usage is recorded in `manifest.json` after completion. Seeded examples are free to inspect.
+
+Internal implementation notes live under `docs/dev/`. Release discipline and preflight checks live in `docs/RELEASE.md`; user-facing changes are tracked in `CHANGELOG.md`.
 
 运行 CLI：
 

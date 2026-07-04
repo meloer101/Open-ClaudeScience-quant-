@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { estimateRunCost, type CostEstimate } from "../api/client";
 
 interface ChatInputProps {
   onSubmit: (request: string) => Promise<void>;
@@ -9,6 +10,7 @@ interface ChatInputProps {
 export function ChatInput({ onSubmit, isRunning = false, onStop }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [estimate, setEstimate] = useState<CostEstimate | null>(null);
 
   const handleSubmit = async () => {
     const trimmed = value.trim();
@@ -17,8 +19,23 @@ export function ChatInput({ onSubmit, isRunning = false, onStop }: ChatInputProp
     try {
       await onSubmit(trimmed);
       setValue("");
+      setEstimate(null);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const refreshEstimate = async (nextValue: string) => {
+    setValue(nextValue);
+    const trimmed = nextValue.trim();
+    if (trimmed.length < 20) {
+      setEstimate(null);
+      return;
+    }
+    try {
+      setEstimate(await estimateRunCost(trimmed));
+    } catch {
+      setEstimate(null);
     }
   };
 
@@ -29,7 +46,7 @@ export function ChatInput({ onSubmit, isRunning = false, onStop }: ChatInputProp
       <div className="border border-warm-150 rounded-2xl bg-white flex items-end gap-2 px-3.5 py-2.5 focus-within:border-warm-400 transition-colors">
         <textarea
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => void refreshEstimate(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -48,6 +65,11 @@ export function ChatInput({ onSubmit, isRunning = false, onStop }: ChatInputProp
         >
           {isRunning ? <span className="w-2.5 h-2.5 bg-white rounded-[2px]" /> : busy ? "…" : "↑"}
         </button>
+      </div>
+      <div className="mt-2 min-h-5 text-[11px] leading-5 text-warm-500">
+        {estimate
+          ? `Preflight: ~${estimate.estimated_tokens.toLocaleString()} tokens, ~$${estimate.estimated_usd.toFixed(4)}. Research only, not investment advice.`
+          : "Research artifacts only; outputs are not investment advice."}
       </div>
     </div>
   );

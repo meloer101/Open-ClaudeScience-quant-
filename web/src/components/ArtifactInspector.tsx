@@ -306,6 +306,9 @@ export function ArtifactInspector({ tabs, activeKey, onSelectTab, onCloseTab, wi
               </a>
             )}
           </div>
+          <div className="px-3.5 py-2 text-[11px] leading-4 text-warm-500 border-b border-warm-100 bg-warm-25">
+            Research artifact only. Not investment advice or an automated trading instruction.
+          </div>
           <ArtifactBody runId={activeTab.runId} artifact={activeTab.artifact} />
         </>
       )}
