@@ -184,7 +184,7 @@
 
 ### 4.2 执行前审查台（human-in-the-loop）（优先级：🟡 中）
 
-**现状**：已落地执行前 staging gate（见 [PHASE13B_HITL_STAGING.md](PHASE13B_HITL_STAGING.md)）。单资产和截面路径会先运行一次便宜 `compute()` 与静态检查，生成 `factor_spec` + `validation_report`；策略函数按静态风险 × 下一步成本决定自动放行或进入 `awaiting_confirmation`。API/Web 可确认并提交 code/config overrides，manifest 记录 `staging` 与 `staged_diff`。
+**现状**：已落地执行前 staging gate（详见 PHASE13B_HITL_STAGING 阶段文档，已随 V0 前清理归档，功能见 `quantbench/agent/staging.py`）。单资产和截面路径会先运行一次便宜 `compute()` 与静态检查，生成 `factor_spec` + `validation_report`；策略函数按静态风险 × 下一步成本决定自动放行或进入 `awaiting_confirmation`。API/Web 可确认并提交 code/config overrides，manifest 记录 `staging` 与 `staged_diff`。
 
 **缺什么**：
 - [x] 执行前 artifact review：factor definition / formula / `compute()` / validation report 在昂贵回测前可见、可改、可审计。

@@ -2,9 +2,11 @@
 
 > 考察日期：2026-07-04 | 方法：通读 GAP_ANALYSIS / PROJECT_STATUS / README，全量测试实跑（325 passed / 1 skipped，约 3.5 分钟），前端 `npm run build` 实跑（成功），抽查核心量化代码（截面回测引擎、DSR 实现）、API 安全面与配置/打包层。
 >
-> 与 [GAP_ANALYSIS.md](GAP_ANALYSIS.md) 的关系：GAP 回答"研究平台还缺什么能力"，本文回答"首次推出给陌生用户之前还缺什么"。两者交集很小——GAP 六章的主体完成度经代码逐项核对是可信的。
+> 与 [GAP_ANALYSIS.md](docs/dev/GAP_ANALYSIS.md) 的关系：GAP 回答"研究平台还缺什么能力"，本文回答"首次推出给陌生用户之前还缺什么"。两者交集很小——GAP 六章的主体完成度经代码逐项核对是可信的。
 >
 > 2026-07-04 更新：合并第二轮独立审查（Codex）的发现，三个阻断项均已逐条对照代码核实，见「〇之二」。其中 funding 低估 bug 推翻了本文初版"crypto 为主打"建议的前提。
+>
+> 2026-07-04 复查（第三轮）：B1–B4 阻断项已全部落地并逐条核实修复正确（非仅 commit message）；测试 325→**346 passed / 1 skipped**（+21 新测试）；产品 onboarding（`quantbench serve` 一键启动、`quantbench examples seed` 种子数据、CHANGELOG/RELEASE）、内部文档归档至 `docs/dev/`、API token+CORS allowlist 均已就位。**阻断项已清零，具备公开首发条件。** 逐条核实见「〇之三」。
 
 ---
 
@@ -52,7 +54,7 @@
 
 - **过期 funding 警告（自相矛盾，单独强调）**：[constants.py:284](quantbench/agent/constants.py) 的 `CRYPTO_PERPETUAL_FUNDING_WARNING` 仍说"不建模 funding"，且 [coordinator.py:359](quantbench/agent/coordinator.py) 对所有 crypto universe **无条件**追加——系统同时"扣了 funding"和"警告说没扣"。对卖点是"可审计诚实"的产品，自相矛盾的警告比缺失的警告伤害更大。应改为条件化：funding 缺失或覆盖不全时才警告（正好覆盖 B1 修复后"分页拉不全"的场景）。
 - **审查台字段太窄**：[StagingReviewPanel.tsx:34](web/src/components/StagingReviewPanel.tsx) 只能编辑 code 和 cost_bps；首发前至少要能审/改 execution、universe、date range、liquidity、borrow、neutralize、n_groups。与 Codex 的 ExecutionAssumption/StagingConfig typed-Interface 方案是同一件事。
-- **文案承诺漂移**：[ChatInput.tsx:39](web/src/components/ChatInput.tsx) placeholder 暗示 @/#//⌘K 可用但无对应交互；[PROJECT_STATUS.md](PROJECT_STATUS.md) 说 4.3 文献接入未做但 CLI/API/Web 已实现三个 Phase。
+- **文案承诺漂移**：[ChatInput.tsx:39](web/src/components/ChatInput.tsx) placeholder 暗示 @/#//⌘K 可用但无对应交互；旧版 PROJECT_STATUS 现状盘点（已删除，内容并入本文档）曾说 4.3 文献接入未做，但 CLI/API/Web 已实现三个 Phase——本文档已是当前唯一的现状来源。
 - **CI 只跑 Python**：与本文「一、4」重合——前端 build/lint/Vitest/Playwright 均未进 CI。
 
 ### 架构建议（非阻断）
@@ -60,6 +62,24 @@
 - **FundingSeries 模块**：即 B1 修复本身，随修复落地。
 - **ExecutionAssumption/StagingConfig 模块**：与审查台补字段合并做。
 - **RunFinalizer 模块**（coordinator 的 finalize/report/manifest 写入拆出）：纯重构，可延后到首发后。
+
+---
+
+## 〇之三、第三轮复查：阻断项修复核实（2026-07-04）
+
+逐条读修复后的代码确认，非依赖 commit message。
+
+| 项 | 状态 | 核实依据 |
+|---|---|---|
+| **B1 funding 分页** | ✅ 修复 | [ccxt_perpetual.py:72](quantbench/data/providers/ccxt_perpetual.py) `while since < end_ms` 循环分页，不再单次 limit=1000 |
+| **B1 funding 对齐** | ✅ 修复 | 新建深模块 [engine/funding.py](quantbench/engine/funding.py) `funding_cost_by_period`：按持仓区间 `[start, next)` 分窗、`aggfunc="sum"` 累加窗口内所有 funding 行（8h/16h/00h 全吃到），并输出 `coverage_ratio` 指标。正是 Codex 建议的 FundingSeries 深模块 |
+| **B2 CORS+token** | ✅ 修复 | [api/security.py](quantbench/api/security.py) `DEFAULT_ALLOWED_ORIGINS` 限定 localhost + [server.py:62](quantbench/api/server.py) 全局 `Depends(require_api_token)` |
+| **B2 literature 导入** | ✅ 修复 | 旧端点拒绝本地路径（"Local PDFs must be imported with the upload endpoint"，仅留 arXiv），新增 `/api/literature/ingest/upload` 用 `UploadFile`——drive-by 读取本机 PDF 的攻击链闭合 |
+| **B3 执行默认口径** | ✅ 修复 | [execution.py:11](quantbench/engine/execution.py) 默认 `fill_price="open_t+1"`；CHANGELOG 注明 close_t 降级为显式乐观口径并触发 Reviewer 警告 |
+| **B4 funding 警告条件化** | ✅ 修复 | [research_notes_support.py:49](quantbench/agent/helpers/research_notes_support.py) 改为 `coverage_ratio>=0.98 且无缺失/失败` 才不警告，文案改为量化的 coverage 报告——消除了"扣了 funding 却警告没扣"的自相矛盾 |
+| 附带 PerpetualData schema | ✅ | 新增 [data/perpetual_schema.py](quantbench/data/perpetual_schema.py)，顺手还了 GAP 1.5 的 schema 债 |
+
+**结论修订**：Codex 与本文初版"先受信任 alpha、修复后再公开首发"的前置条件已满足——阻断项清零、测试全绿、产品 onboarding 就位。下方「一~三」章中被上述修复覆盖的条目视为已关闭，剩余为可延后增强项。
 
 ---
 
