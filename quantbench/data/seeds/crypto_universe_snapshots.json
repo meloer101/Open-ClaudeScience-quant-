@@ -1,0 +1,19 @@
+[
+  {
+    "date": "2026-07-04",
+    "quote": "USDT",
+    "provider": "launch_seed",
+    "symbols": [
+      "BTC/USDT:USDT",
+      "ETH/USDT:USDT",
+      "SOL/USDT:USDT",
+      "XRP/USDT:USDT",
+      "BNB/USDT:USDT",
+      "DOGE/USDT:USDT",
+      "ADA/USDT:USDT",
+      "LINK/USDT:USDT",
+      "AVAX/USDT:USDT",
+      "TRX/USDT:USDT"
+    ]
+  }
+]

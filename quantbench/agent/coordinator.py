@@ -427,6 +427,7 @@ def build_run_cross_sectional_backtest_skill(ctx: _RunContext, run) -> Skill:
             ic_series=backtest.ic_series,
             ic_significance=backtest.ic_significance,
             mcp_calls=ctx.mcp_calls,
+            universe=ctx.universe.to_dict(),
         )
         ctx.review_report = review_report
         run.save_json("review_report.json", review_report.to_dict())

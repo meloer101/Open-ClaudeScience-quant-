@@ -31,11 +31,20 @@ def build_signal_export(entry: FactorEntry, *, conn: duckdb.DuckDBPyConnection |
     weights = refresh_and_recompute_weights(entry.source_run_id, conn)
     if weights is None:
         return {
+            "status": "unsupported",
+            "reason": "single_asset_export_not_supported",
+            "factor_name": entry.name,
+            "source_run_id": entry.source_run_id,
             "error": (
                 f"signal export is not supported for factor {entry.name!r}: its source run "
                 f"{entry.source_run_id!r} is not a cross-sectional run (no universe of target "
                 "weights to export). Single-asset signal export is not implemented yet."
-            )
+            ),
+            "message": (
+                f"signal export is not supported for factor {entry.name!r}: its source run "
+                f"{entry.source_run_id!r} is not a cross-sectional run."
+            ),
+            "next_step": "Use a cross-sectional factor with a saved universe, or keep this as a research-only artifact.",
         }
 
     return {
@@ -51,5 +60,9 @@ def build_signal_export(entry: FactorEntry, *, conn: duckdb.DuckDBPyConnection |
         "data_as_of_note": (
             "target_weights are computed from data refreshed at export time, not the original "
             "backtest-period data - this is a live, current-period signal, not a historical replay."
+        ),
+        "risk_disclaimer": (
+            "Research export only. These target weights are not investment advice and are not an "
+            "automated trading instruction."
         ),
     }

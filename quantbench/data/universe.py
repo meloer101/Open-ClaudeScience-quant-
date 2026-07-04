@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import asdict, dataclass, replace
+from importlib.resources import files
 from pathlib import Path
 
 import yaml
@@ -208,12 +210,15 @@ def build_point_in_time_crypto_perpetual(
             conn.close()
 
     if earliest_snapshot_date(daily_snapshots) is None:
-        raise ValueError(
-            f"no crypto universe snapshot exists for any day in [{start}, {end}] - "
-            "point-in-time reconstruction needs at least one day of accumulated "
-            "snapshot history. Run `quantbench universe snapshot-crypto` going forward, "
-            "or use point_in_time=False for the current-ranking universe."
-        )
+        seed_snapshots = crypto_seed_snapshots(start, end, quote=quote)
+        if not seed_snapshots:
+            raise ValueError(
+                f"no crypto universe snapshot exists for any day in [{start}, {end}] - "
+                "point-in-time reconstruction needs at least one day of accumulated "
+                "snapshot history. Run `quantbench universe snapshot-crypto` going forward, "
+                "or use point_in_time=False for the current-ranking universe."
+            )
+        daily_snapshots.update(seed_snapshots)
 
     intervals = reconstruct_crypto_membership_intervals(daily_snapshots)
     symbols = sorted(intervals.keys())
@@ -232,6 +237,34 @@ def build_point_in_time_crypto_perpetual(
         asset_class="crypto",
         membership_intervals=_serializable_intervals(intervals),
     )
+
+
+def crypto_seed_snapshots(start: str, end: str, *, quote: str = "USDT") -> dict[str, list[str]]:
+    """Return packaged launch seed snapshots within [start, end].
+
+    The seed is intentionally small and clearly marked in the trust policy; it
+    gives first-time users a deterministic PIT-shaped crypto example while
+    real daily snapshots accumulate locally.
+    """
+    start_ts = pd_timestamp(start)
+    end_ts = pd_timestamp(end)
+    resource = files("quantbench.data.seeds").joinpath("crypto_universe_snapshots.json")
+    payload = json.loads(resource.read_text(encoding="utf-8"))
+    snapshots: dict[str, list[str]] = {}
+    for item in payload:
+        if item.get("quote") != quote:
+            continue
+        date = str(item["date"])
+        ts = pd_timestamp(date)
+        if start_ts <= ts <= end_ts:
+            snapshots[date] = list(item.get("symbols") or [])
+    return snapshots
+
+
+def pd_timestamp(value: str):
+    import pandas as pd
+
+    return pd.Timestamp(value).normalize()
 
 
 def build_universe(
