@@ -135,10 +135,80 @@ function tabLabel(artifact: ArtifactInfo): string {
   return artifact.kind === "chart-dashboard" ? "Interactive Charts" : artifact.filename;
 }
 
+function ReproductionComparisonCard({ text }: { text: string }) {
+  let data: import("../types").ReproductionComparison;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return <pre className="text-xs text-danger-600">{text}</pre>;
+  }
+  const source = (data.literature_source ?? {}) as Record<string, unknown>;
+  const fmt = (value: number | null, sign = false): string => {
+    if (value === null || value === undefined) return "—";
+    return sign ? (value >= 0 ? `+${value.toFixed(3)}` : value.toFixed(3)) : value.toFixed(3);
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="text-sm font-medium text-warm-900">文献复现对比 · {data.factor_name}</div>
+        {typeof source.citation === "string" && (
+          <div className="text-xs text-warm-400 mt-0.5">{source.citation}</div>
+        )}
+        <div className="text-xs text-warm-400">
+          {data.reported_sample_period ? `论文样本区间 ${data.reported_sample_period}` : ""}
+          {data.reported_universe ? ` · ${data.reported_universe}` : ""}
+        </div>
+      </div>
+      <table className="w-full text-xs border border-warm-100 rounded-lg overflow-hidden">
+        <thead className="bg-warm-50 text-warm-500">
+          <tr>
+            <th className="text-left px-2 py-1.5">指标</th>
+            <th className="text-right px-2 py-1.5">论文报告</th>
+            <th className="text-right px-2 py-1.5">本地复现</th>
+            <th className="text-right px-2 py-1.5">差异</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((row) => (
+            <tr key={row.metric} className="border-t border-warm-50">
+              <td className="px-2 py-1.5 text-warm-800">{row.label}</td>
+              <td className="px-2 py-1.5 text-right text-warm-700">{fmt(row.reported)}</td>
+              <td className="px-2 py-1.5 text-right text-warm-700">{fmt(row.reproduced)}</td>
+              <td className="px-2 py-1.5 text-right text-warm-600">{fmt(row.delta, true)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.assumptions?.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-warm-600 mb-1">复现假设（论文未明确）</div>
+          <ul className="text-xs text-warm-600 list-disc pl-4 space-y-0.5">
+            {data.assumptions.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {data.known_caveats?.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-warm-600 mb-1">已知局限</div>
+          <ul className="text-xs text-warm-600 list-disc pl-4 space-y-0.5">
+            {data.known_caveats.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="text-xs text-warm-400 border-t border-warm-100 pt-2">{data.note}</div>
+    </div>
+  );
+}
+
 function ArtifactBody({ runId, artifact }: { runId: string; artifact: ArtifactInfo }) {
   const { data: text, isLoading } = useArtifactText(runId, artifact);
   const url = artifactUrl(runId, artifact.filename);
   const isParquet = artifact.kind === "binary" && artifact.filename.endsWith(".parquet");
+  const isReproComparison = artifact.filename === "reproduction_comparison.json";
 
   if (artifact.kind === "chart-dashboard") {
     return (
@@ -170,7 +240,8 @@ function ArtifactBody({ runId, artifact }: { runId: string; artifact: ArtifactIn
         </div>
       )}
       {text !== undefined && artifact.kind === "csv" && <CsvTable text={text} />}
-      {text !== undefined && (artifact.kind === "json" || artifact.kind === "yaml" || artifact.kind === "code") && (
+      {text !== undefined && isReproComparison && <ReproductionComparisonCard text={text} />}
+      {text !== undefined && !isReproComparison && (artifact.kind === "json" || artifact.kind === "yaml" || artifact.kind === "code") && (
         <pre className="text-xs bg-warm-50 border border-warm-100 rounded-lg p-3 overflow-auto whitespace-pre-wrap text-warm-800">
           {text}
         </pre>

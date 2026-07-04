@@ -226,3 +226,47 @@ export type RunEvent =
   | { type: "final"; summary: string }
   | { type: "cancelled" }
   | { type: "error"; message: string };
+
+// --- Literature (GAP 4.3) ---
+export interface PaperSummary {
+  paper_id: string;
+  title: string;
+  authors: string[];
+  source: string;
+  source_kind: string;
+  arxiv_id: string | null;
+  n_pages: number;
+}
+
+export interface PaperPage {
+  page_number: number;
+  text: string;
+}
+
+export interface PaperDetail extends PaperSummary {
+  pages: PaperPage[];
+}
+
+export interface AskPaperResponse {
+  answer: string;
+  grounded_page: number | null;
+}
+
+export interface ReproductionComparisonRow {
+  metric: string;
+  label: string;
+  reported: number | null;
+  reproduced: number | null;
+  delta: number | null;
+}
+
+export interface ReproductionComparison {
+  factor_name: string;
+  literature_source: Record<string, unknown> | null;
+  reported_sample_period: string | null;
+  reported_universe: string | null;
+  assumptions: string[];
+  known_caveats: string[];
+  rows: ReproductionComparisonRow[];
+  note: string;
+}

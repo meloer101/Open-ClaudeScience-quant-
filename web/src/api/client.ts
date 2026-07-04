@@ -1,10 +1,13 @@
 import type {
+  AskPaperResponse,
   BacktestResultPayload,
   CompareTable,
   DecayReportEntry,
   ExperimentRecord,
   LineageResult,
   MonitoringReport,
+  PaperDetail,
+  PaperSummary,
   ParquetPreview,
   PortfolioSummary,
   ResearchSession,
@@ -99,6 +102,47 @@ export function forkRun(runId: string, modification: string): Promise<{ run_id: 
   return request(`/runs/${encodeURIComponent(runId)}/fork`, {
     method: "POST",
     body: JSON.stringify({ modification }),
+  });
+}
+
+// --- Literature (GAP 4.3) ---
+
+export function listPapers(): Promise<PaperSummary[]> {
+  return request<PaperSummary[]>("/literature");
+}
+
+export function ingestPaper(source: string): Promise<PaperSummary> {
+  return request<PaperSummary>("/literature/ingest", {
+    method: "POST",
+    body: JSON.stringify({ source }),
+  });
+}
+
+export function getPaper(paperId: string): Promise<PaperDetail> {
+  return request<PaperDetail>(`/literature/${encodeURIComponent(paperId)}`);
+}
+
+export function paperPdfUrl(paperId: string): string {
+  return `/api/literature/${encodeURIComponent(paperId)}/pdf`;
+}
+
+export function askPaper(
+  paperId: string,
+  body: { selection: string; question: string; page: number | null },
+): Promise<AskPaperResponse> {
+  return request<AskPaperResponse>(`/literature/${encodeURIComponent(paperId)}/ask`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function reproducePaper(
+  paperId: string,
+  body: { request?: string | null; selection?: string | null; page?: number | null },
+): Promise<{ run_id: string; status: string }> {
+  return request(`/literature/${encodeURIComponent(paperId)}/reproduce`, {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }
 

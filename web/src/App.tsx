@@ -4,6 +4,8 @@ import {
   listRuns,
   getRun,
   listLibrary,
+  listPapers,
+  ingestPaper,
   cancelRun,
   confirmStaging,
   createSession,
@@ -14,10 +16,12 @@ import { useRunEvents } from "./hooks/useRunEvents";
 import { Sidebar } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
 import { ChatPane } from "./components/ChatPane";
+import { LiteratureViewer } from "./components/LiteratureViewer";
 import { ArtifactInspector, type OpenArtifactTab } from "./components/ArtifactInspector";
 import { ResizeHandle } from "./components/ResizeHandle";
 
 const DRAFT_ID = "draft";
+const PAPER_PREFIX = "paper:";
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 480;
@@ -37,6 +41,10 @@ function artifactKey(runId: string, filename: string): string {
 
 function isSessionId(id: string | null): boolean {
   return Boolean(id?.startsWith("session_"));
+}
+
+function isPaperTab(id: string | null): boolean {
+  return Boolean(id?.startsWith(PAPER_PREFIX));
 }
 
 // The Interactive Charts tab isn't backed by a real file (see types.ts
@@ -88,6 +96,8 @@ function App() {
     refetchInterval: 3000,
   });
 
+  const { data: papers = [] } = useQuery({ queryKey: ["papers"], queryFn: listPapers, refetchInterval: 5000 });
+
   useEffect(() => {
     if (openTabs.length === 0 && runs.length > 0) {
       setOpenTabs([runs[0].run_id]);
@@ -97,7 +107,8 @@ function App() {
 
   const isDraftActive = activeTabId === DRAFT_ID;
   const activeSessionId = isSessionId(activeTabId) ? activeTabId : null;
-  const activeLegacyRunId = !isDraftActive && !activeSessionId ? activeTabId : null;
+  const activePaperId = isPaperTab(activeTabId) ? activeTabId!.slice(PAPER_PREFIX.length) : null;
+  const activeLegacyRunId = !isDraftActive && !activeSessionId && !activePaperId ? activeTabId : null;
 
   const { data: currentRun, isLoading: isRunLoading } = useQuery({
     queryKey: ["run", activeLegacyRunId],
@@ -133,6 +144,10 @@ function App() {
     if (id === DRAFT_ID) {
       return { id, label: "New session", status: "draft" };
     }
+    if (id.startsWith(PAPER_PREFIX)) {
+      const paper = papers.find((item) => item.paper_id === id.slice(PAPER_PREFIX.length));
+      return { id, label: paper?.title || "Paper", status: "completed" };
+    }
     if (id.startsWith("session_")) {
       const session = currentSession?.session_id === id ? currentSession : null;
       const firstRunId = session?.turns[0]?.run_id;
@@ -158,6 +173,18 @@ function App() {
   const openRunTab = (runId: string) => {
     setOpenTabs((prev) => (prev.includes(runId) ? prev : [...prev, runId]));
     setActiveTabId(runId);
+  };
+
+  const openPaperTab = (paperId: string) => {
+    const tabId = `${PAPER_PREFIX}${paperId}`;
+    setOpenTabs((prev) => (prev.includes(tabId) ? prev : [...prev, tabId]));
+    setActiveTabId(tabId);
+  };
+
+  const handleImportPaper = async (source: string) => {
+    const paper = await ingestPaper(source);
+    await queryClient.invalidateQueries({ queryKey: ["papers"] });
+    openPaperTab(paper.paper_id);
   };
 
   const toggleCompare = (runId: string) => {
@@ -274,8 +301,12 @@ function App() {
       <Sidebar
         runs={runs}
         libraryRecords={libraryRecords}
+        papers={papers}
         selectedRunId={activeLegacyRunId}
+        activePaperId={activePaperId}
         onSelect={openRunTab}
+        onOpenPaper={openPaperTab}
+        onImportPaper={handleImportPaper}
         onNew={handleNewTab}
         compareRunIds={compareRunIds}
         onToggleCompare={toggleCompare}
@@ -291,6 +322,10 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <SessionTabBar tabs={sessionTabs} activeId={activeTabId} onSelect={selectTab} onClose={closeTab} />
         <div className="flex-1 flex min-h-0">
+          {activePaperId ? (
+            <LiteratureViewer paperId={activePaperId} onOpenRun={openRunTab} />
+          ) : (
+          <>
           <ChatPane
             run={currentRun ?? null}
             session={currentSession ?? null}
@@ -322,6 +357,8 @@ function App() {
             onCloseTab={closeArtifactTab}
             width={inspectorWidth}
           />
+          </>
+          )}
         </div>
       </div>
     </div>

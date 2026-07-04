@@ -1,11 +1,16 @@
+import { useState } from "react";
 import { MonitoringStatusBadge } from "./MonitoringStatusBadge";
-import type { ExperimentRecord, RunSummary } from "../types";
+import type { ExperimentRecord, PaperSummary, RunSummary } from "../types";
 
 interface SidebarProps {
   runs: RunSummary[];
   libraryRecords: ExperimentRecord[];
+  papers: PaperSummary[];
   selectedRunId: string | null;
+  activePaperId: string | null;
   onSelect: (runId: string) => void;
+  onOpenPaper: (paperId: string) => void;
+  onImportPaper: (source: string) => Promise<void>;
   onNew: () => void;
   compareRunIds: string[];
   onToggleCompare: (runId: string) => void;
@@ -14,6 +19,81 @@ interface SidebarProps {
   onLibraryFiltersChange: (filters: { verdict: string; asset: string; sort: string }) => void;
   isLoading: boolean;
   width: number;
+}
+
+function LiteratureSection({
+  papers,
+  activePaperId,
+  onOpenPaper,
+  onImportPaper,
+}: {
+  papers: PaperSummary[];
+  activePaperId: string | null;
+  onOpenPaper: (paperId: string) => void;
+  onImportPaper: (source: string) => Promise<void>;
+}) {
+  const [source, setSource] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const value = source.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onImportPaper(value);
+      setSource("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="px-3 pb-3 border-b border-warm-100">
+      <div className="text-xs font-medium text-warm-500 mb-2 px-1">Literature</div>
+      <div className="flex gap-1.5 mb-2">
+        <input
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submit();
+          }}
+          placeholder="arXiv URL / 本地 PDF 路径"
+          className="flex-1 min-w-0 text-xs border border-warm-150 rounded-md bg-white px-1.5 py-1"
+        />
+        <button
+          onClick={() => void submit()}
+          disabled={busy || !source.trim()}
+          className="text-xs px-2 py-1 rounded-md bg-warm-900 text-white disabled:bg-warm-150 disabled:text-warm-500"
+        >
+          {busy ? "…" : "导入"}
+        </button>
+      </div>
+      {error && <div className="text-[10px] text-danger-600 mb-1 px-1 break-words">{error}</div>}
+      {papers.length > 0 && (
+        <div className="max-h-40 overflow-y-auto border border-warm-100 rounded-md bg-white">
+          {papers.map((paper) => (
+            <button
+              key={paper.paper_id}
+              onClick={() => onOpenPaper(paper.paper_id)}
+              className={`w-full text-left px-2 py-1.5 border-b border-warm-50 last:border-b-0 text-xs ${
+                paper.paper_id === activePaperId ? "bg-warm-50" : ""
+              }`}
+            >
+              <span className="block truncate text-warm-800">{paper.title}</span>
+              <span className="text-warm-400">
+                {paper.source_kind}
+                {paper.arxiv_id ? ` · ${paper.arxiv_id}` : ""} · {paper.n_pages}p
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function dateGroupLabel(createdAt: string): string {
@@ -63,8 +143,12 @@ function fmt(value: number | null): string {
 export function Sidebar({
   runs,
   libraryRecords,
+  papers,
   selectedRunId,
+  activePaperId,
   onSelect,
+  onOpenPaper,
+  onImportPaper,
   onNew,
   compareRunIds,
   onToggleCompare,
@@ -166,6 +250,12 @@ export function Sidebar({
           Compare {compareRunIds.length || ""}
         </button>
       </div>
+      <LiteratureSection
+        papers={papers}
+        activePaperId={activePaperId}
+        onOpenPaper={onOpenPaper}
+        onImportPaper={onImportPaper}
+      />
       <div className="flex-1 overflow-y-auto pb-2">
         {isLoading && <div className="px-3 py-2 text-sm text-warm-400">Loading…</div>}
         {!isLoading && runs.length === 0 && (
