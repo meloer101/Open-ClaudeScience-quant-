@@ -5,3 +5,4 @@ data_cache/
 runs/
 .env
 .claude/*.local.json
+memory/
