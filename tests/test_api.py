@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 import pytest
@@ -32,6 +33,56 @@ def client(tmp_path, monkeypatch):
     from quantbench.api.server import app
 
     return TestClient(app, headers={"X-QuantBench-Token": "test-token"})
+
+
+def test_config_status_reflects_active_model_and_its_provider_key(client, monkeypatch):
+    monkeypatch.delenv("QUANTBENCH_MODEL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    assert client.get("/api/config/status").json() == {
+        "llm_key_configured": False,
+        "model": "deepseek/deepseek-chat",
+        "key_env": "DEEPSEEK_API_KEY",
+    }
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    assert client.get("/api/config/status").json()["llm_key_configured"] is True
+
+    monkeypatch.setenv("QUANTBENCH_MODEL", "openai/gpt-4o")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    body = client.get("/api/config/status").json()
+    assert body == {"llm_key_configured": False, "model": "openai/gpt-4o", "key_env": "OPENAI_API_KEY"}
+
+
+def test_post_llm_key_persists_model_and_key_to_env_file_and_current_process(client, tmp_path, monkeypatch):
+    monkeypatch.delenv("QUANTBENCH_MODEL", raising=False)
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    monkeypatch.setattr("quantbench.api.llm_key.ENV_FILE", tmp_path / ".env")
+
+    response = client.post("/api/config/llm-key", json={"model": "moonshot/kimi-k2", "api_key": "sk-live-123"})
+
+    assert response.status_code == 200
+    assert os.environ["QUANTBENCH_MODEL"] == "moonshot/kimi-k2"
+    assert os.environ["MOONSHOT_API_KEY"] == "sk-live-123"
+    env_contents = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "QUANTBENCH_MODEL=moonshot/kimi-k2" in env_contents
+    assert "MOONSHOT_API_KEY=sk-live-123" in env_contents
+    assert client.get("/api/config/status").json() == {
+        "llm_key_configured": True,
+        "model": "moonshot/kimi-k2",
+        "key_env": "MOONSHOT_API_KEY",
+    }
+
+
+def test_post_llm_key_rejects_blank_key(client):
+    response = client.post("/api/config/llm-key", json={"model": "deepseek/deepseek-chat", "api_key": "   "})
+
+    assert response.status_code == 400
+
+
+def test_post_llm_key_rejects_blank_model(client):
+    response = client.post("/api/config/llm-key", json={"model": "   ", "api_key": "sk-test"})
+
+    assert response.status_code == 400
 
 
 def test_list_runs_returns_summaries(tmp_path, client):

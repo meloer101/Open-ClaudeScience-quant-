@@ -250,3 +250,22 @@ export function triggerMonitoringCheck(
 ): Promise<DecayReportEntry | { error: string } | { skipped: string; verdict: string | null }> {
   return request(`/runs/${encodeURIComponent(runId)}/monitoring/check`, { method: "POST" });
 }
+
+// --- Config ---
+
+export interface ConfigStatus {
+  llm_key_configured: boolean;
+  model: string;
+  key_env: string;
+}
+
+export function getConfigStatus(): Promise<ConfigStatus> {
+  return request("/config/status");
+}
+
+export function setLlmConfig(model: string, apiKey: string): Promise<{ status: string }> {
+  return request("/config/llm-key", {
+    method: "POST",
+    body: JSON.stringify({ model, api_key: apiKey }),
+  });
+}

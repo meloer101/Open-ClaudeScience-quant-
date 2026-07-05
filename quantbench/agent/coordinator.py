@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import threading
 from quantbench.agent.execution_backend import get_execution_backend
 from collections.abc import Callable
@@ -12,7 +13,7 @@ import pandas as pd
 from quantbench.agent.llm import LLMClient
 from quantbench.agent.prompts import SYSTEM_PROMPT
 from quantbench.artifact.store import ArtifactStore
-from quantbench.config import CRITIC_MODEL, DEFAULT_COST_BPS, DEFAULT_MODEL, MCP_SERVERS_CONFIG, RUNS_DIR
+from quantbench.config import CRITIC_MODEL, DEFAULT_COST_BPS, DEFAULT_MODEL, MCP_SERVERS_CONFIG, MODEL_ENV, RUNS_DIR
 from quantbench.config import (
     PORTFOLIO_MAX_WEIGHT,
     PORTFOLIO_TRAIN_TEST_SPLIT,
@@ -697,10 +698,13 @@ class Coordinator:
         critic_llm: LLMClient | None = None,
         memory_store: UserMemoryStore | None = None,
     ):
-        self.model = model or DEFAULT_MODEL
+        self.model = model or os.environ.get(MODEL_ENV, DEFAULT_MODEL)
         self.run_store = run_store or ArtifactStore(RUNS_DIR)
         self.llm = llm or LLMClient(self.model)
-        self.critic_llm = critic_llm or LLMClient(CRITIC_MODEL)
+        # Falls back to whichever model the user just configured (self.model),
+        # not the hardcoded default, so switching provider from the Web UI
+        # covers the Critic too unless QUANTBENCH_CRITIC_MODEL explicitly pins it.
+        self.critic_llm = critic_llm or LLMClient(os.environ.get("QUANTBENCH_CRITIC_MODEL", self.model))
         self.critic_model = str(getattr(self.critic_llm, "model", CRITIC_MODEL))
         self._mcp_configs = load_mcp_config(MCP_SERVERS_CONFIG)
         self.memory_store = memory_store or UserMemoryStore()

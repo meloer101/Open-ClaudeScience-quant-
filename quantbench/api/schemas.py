@@ -77,6 +77,17 @@ class StatusResponse(BaseModel):
     status: str
 
 
+class ConfigStatus(BaseModel):
+    llm_key_configured: bool
+    model: str
+    key_env: str
+
+
+class LlmKeyRequest(BaseModel):
+    model: str
+    api_key: str
+
+
 class StagingConfirmRequest(BaseModel):
     overrides: dict = {}
 

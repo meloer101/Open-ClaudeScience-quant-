@@ -11,14 +11,18 @@ import {
   createSession,
   createSessionTurn,
   getSession,
+  getConfigStatus,
+  setLlmConfig,
 } from "./api/client";
 import { useRunEvents } from "./hooks/useRunEvents";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, SidebarToggleIcon } from "./components/Sidebar";
 import { SessionTabBar, type SessionTab } from "./components/SessionTabBar";
 import { ChatPane } from "./components/ChatPane";
 import { LiteratureViewer } from "./components/LiteratureViewer";
 import type { OpenArtifactTab } from "./components/ArtifactInspector";
 import { ResizeHandle } from "./components/ResizeHandle";
+import { ApiKeyModal } from "./components/ApiKeyModal";
+import { HomePage } from "./HomePage";
 
 const ArtifactInspector = lazy(() =>
   import("./components/ArtifactInspector").then((module) => ({ default: module.ArtifactInspector })),
@@ -56,14 +60,16 @@ function isPaperTab(id: string | null): boolean {
 // derived from run_reader.list_artifacts.
 const CHARTS_FILENAME = "__charts__";
 
-function App() {
+function WorkbenchApp() {
   const queryClient = useQueryClient();
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [openArtifactTabs, setOpenArtifactTabs] = useState<OpenArtifactTab[]>([]);
   const [activeArtifactKey, setActiveArtifactKey] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [compareRunIds, setCompareRunIds] = useState<string[]>([]);
   const [libraryFilters, setLibraryFilters] = useState({ verdict: "", asset: "", sort: "created_at" });
 
@@ -101,6 +107,17 @@ function App() {
   });
 
   const { data: papers = [] } = useQuery({ queryKey: ["papers"], queryFn: listPapers, refetchInterval: 5000 });
+
+  const { data: configStatus } = useQuery({
+    queryKey: ["config-status"],
+    queryFn: getConfigStatus,
+    refetchInterval: 5000,
+  });
+
+  const handleSaveLlmKey = async (model: string, apiKey: string) => {
+    await setLlmConfig(model, apiKey);
+    await queryClient.invalidateQueries({ queryKey: ["config-status"] });
+  };
 
   useEffect(() => {
     if (openTabs.length === 0 && runs.length > 0) {
@@ -302,73 +319,121 @@ function App() {
 
   return (
     <div className="h-screen w-screen flex">
-      <Sidebar
-        runs={runs}
-        libraryRecords={libraryRecords}
-        papers={papers}
-        selectedRunId={activeLegacyRunId}
-        activePaperId={activePaperId}
-        onSelect={openRunTab}
-        onOpenPaper={openPaperTab}
-        onImportPaper={handleImportPaper}
-        onNew={handleNewTab}
-        compareRunIds={compareRunIds}
-        onToggleCompare={toggleCompare}
-        onOpenCompare={() => {
-          if (compareRunIds[0]) openRunTab(compareRunIds[0]);
-        }}
-        libraryFilters={libraryFilters}
-        onLibraryFiltersChange={setLibraryFilters}
-        isLoading={isRunsLoading}
-        width={sidebarWidth}
-      />
-      <ResizeHandle onResize={handleSidebarResize} />
+      {configStatus && !configStatus.llm_key_configured && (
+        <ApiKeyModal currentModel={configStatus.model} onSubmit={handleSaveLlmKey} />
+      )}
+      {sidebarCollapsed ? (
+        <div className="shrink-0 w-11 h-full bg-warm-50 flex flex-col items-center">
+          <div className="h-[45px] flex items-center justify-center shrink-0">
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(false)}
+              aria-label="展开侧栏"
+              title="展开侧栏"
+              className="flex items-center justify-center w-8 h-8 rounded-md text-warm-500 hover:bg-warm-100 hover:text-warm-700 transition-colors"
+            >
+              <SidebarToggleIcon className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Sidebar
+            runs={runs}
+            libraryRecords={libraryRecords}
+            papers={papers}
+            selectedRunId={activeLegacyRunId}
+            activePaperId={activePaperId}
+            onSelect={openRunTab}
+            onOpenPaper={openPaperTab}
+            onImportPaper={handleImportPaper}
+            onNew={handleNewTab}
+            compareRunIds={compareRunIds}
+            onToggleCompare={toggleCompare}
+            onOpenCompare={() => {
+              if (compareRunIds[0]) openRunTab(compareRunIds[0]);
+            }}
+            libraryFilters={libraryFilters}
+            onLibraryFiltersChange={setLibraryFilters}
+            isLoading={isRunsLoading}
+            width={sidebarWidth}
+            onToggleCollapse={() => setSidebarCollapsed(true)}
+          />
+          <ResizeHandle onResize={handleSidebarResize} />
+        </>
+      )}
       <div className="flex-1 flex flex-col min-w-0">
         <SessionTabBar tabs={sessionTabs} activeId={activeTabId} onSelect={selectTab} onClose={closeTab} />
         <div className="flex-1 flex min-h-0">
           {activePaperId ? (
             <LiteratureViewer paperId={activePaperId} onOpenRun={openRunTab} />
           ) : (
-          <>
-          <ChatPane
-            run={currentRun ?? null}
-            session={currentSession ?? null}
-            sessionRuns={sessionRuns}
-            isLoading={(Boolean(activeLegacyRunId) && isRunLoading) || (Boolean(activeSessionId) && isSessionLoading)}
-            isDraft={isDraftActive || openTabs.length === 0}
-            liveEvents={liveEvents}
-            liveRunId={liveRunId}
-            selectedFilename={
-              activeArtifactKey ? openArtifactTabs.find((tab) => tab.key === activeArtifactKey)?.artifact.filename ?? null : null
-            }
-            onSelectArtifact={handleSelectArtifact}
-            onOpenCharts={handleOpenCharts}
-            isChartsSelected={activeArtifactKey === (activeLegacyRunId ? artifactKey(activeLegacyRunId, CHARTS_FILENAME) : null)}
-            isChartsSelectedForRun={(runId) => activeArtifactKey === artifactKey(runId, CHARTS_FILENAME)}
-            onSubmit={handleSubmit}
-            isRunning={Boolean(liveRunId)}
-            onStop={() => void handleStop()}
-            onConfirmStaging={handleConfirmStaging}
-            compareRunIds={compareRunIds}
-            onClearCompare={() => setCompareRunIds([])}
-            onForked={handleForked}
-          />
-          <ResizeHandle onResize={handleInspectorResize} />
-          <Suspense fallback={<div className="h-full border-l border-slate-200 bg-white" style={{ width: inspectorWidth }} />}>
-            <ArtifactInspector
-              tabs={openArtifactTabs}
-              activeKey={activeArtifactKey}
-              onSelectTab={setActiveArtifactKey}
-              onCloseTab={closeArtifactTab}
-              width={inspectorWidth}
+            <ChatPane
+              run={currentRun ?? null}
+              session={currentSession ?? null}
+              sessionRuns={sessionRuns}
+              isLoading={(Boolean(activeLegacyRunId) && isRunLoading) || (Boolean(activeSessionId) && isSessionLoading)}
+              isDraft={isDraftActive || openTabs.length === 0}
+              liveEvents={liveEvents}
+              liveRunId={liveRunId}
+              selectedFilename={
+                activeArtifactKey ? openArtifactTabs.find((tab) => tab.key === activeArtifactKey)?.artifact.filename ?? null : null
+              }
+              onSelectArtifact={handleSelectArtifact}
+              onOpenCharts={handleOpenCharts}
+              isChartsSelected={activeArtifactKey === (activeLegacyRunId ? artifactKey(activeLegacyRunId, CHARTS_FILENAME) : null)}
+              isChartsSelectedForRun={(runId) => activeArtifactKey === artifactKey(runId, CHARTS_FILENAME)}
+              onSubmit={handleSubmit}
+              isRunning={Boolean(liveRunId)}
+              onStop={() => void handleStop()}
+              onConfirmStaging={handleConfirmStaging}
+              compareRunIds={compareRunIds}
+              onClearCompare={() => setCompareRunIds([])}
+              onForked={handleForked}
             />
-          </Suspense>
-          </>
           )}
         </div>
       </div>
+      {!activePaperId &&
+        (inspectorCollapsed ? (
+          <div className="shrink-0 w-11 h-full bg-warm-50 flex flex-col items-center">
+            <div className="h-[45px] flex items-center justify-center shrink-0">
+              <button
+                type="button"
+                onClick={() => setInspectorCollapsed(false)}
+                aria-label="展开 Artifact 面板"
+                title="展开 Artifact 面板"
+                className="flex items-center justify-center w-8 h-8 rounded-md text-warm-500 hover:bg-warm-100 hover:text-warm-700 transition-colors"
+              >
+                <SidebarToggleIcon className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <ResizeHandle onResize={handleInspectorResize} />
+            <Suspense fallback={<div className="h-full border-l border-slate-200 bg-white" style={{ width: inspectorWidth }} />}>
+              <ArtifactInspector
+                tabs={openArtifactTabs}
+                activeKey={activeArtifactKey}
+                onSelectTab={setActiveArtifactKey}
+                onCloseTab={closeArtifactTab}
+                width={inspectorWidth}
+                onToggleCollapse={() => setInspectorCollapsed(true)}
+              />
+            </Suspense>
+          </>
+        ))}
     </div>
   );
+}
+
+function App() {
+  if (window.location.pathname === "/" || window.location.pathname === "/home") {
+    return <HomePage />;
+  }
+
+  return <WorkbenchApp />;
 }
 
 export default App;

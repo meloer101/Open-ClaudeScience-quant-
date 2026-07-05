@@ -41,9 +41,7 @@ export function ResizeHandle({ onResize }: ResizeHandleProps) {
       onMouseDown={handleMouseDown}
       role="separator"
       aria-orientation="vertical"
-      className="w-2.5 shrink-0 cursor-col-resize group flex justify-center"
-    >
-      <div className="w-px h-full bg-warm-150 group-hover:bg-warm-400 group-active:bg-warm-500 transition-colors" />
-    </div>
+      className="relative z-10 w-1 shrink-0 -mx-1 cursor-col-resize bg-transparent hover:bg-warm-300 active:bg-warm-400 transition-colors"
+    />
   );
 }

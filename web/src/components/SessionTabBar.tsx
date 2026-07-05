@@ -15,7 +15,7 @@ export function SessionTabBar({ tabs, activeId, onSelect, onClose }: SessionTabB
   if (tabs.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 bg-warm-25 border-b border-warm-100 overflow-x-auto p-1.5">
+    <div className="flex items-center gap-1 bg-warm-50 overflow-x-auto p-1.5">
       {tabs.map((tab) => (
         <div
           key={tab.id}

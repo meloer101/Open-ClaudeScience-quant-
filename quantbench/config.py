@@ -20,6 +20,10 @@ SKILL_DOCS_DIR = PROJECT_ROOT / "skills_docs"
 MCP_SERVERS_CONFIG = PROJECT_ROOT / "mcp_servers.json"
 DEFAULT_COST_BPS = 5.0
 DEFAULT_MODEL = "deepseek/deepseek-chat"
+# Read fresh at Coordinator construction time (not cached into a module
+# constant like CRITIC_MODEL below) so a model switched from the Web UI's
+# setup modal takes effect on the very next run, no process restart required.
+MODEL_ENV = "QUANTBENCH_MODEL"
 MAX_STEPS = 12
 SCREEN_MAX_CANDIDATES = 20
 SCREEN_MAX_WORKERS = 4

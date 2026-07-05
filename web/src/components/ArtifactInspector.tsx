@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import Papa from "papaparse";
 import type { ArtifactInfo, ParquetPreview } from "../types";
 import { artifactUrl, previewParquet } from "../api/client";
@@ -31,6 +32,16 @@ interface ArtifactInspectorProps {
   onSelectTab: (key: string) => void;
   onCloseTab: (key: string) => void;
   width: number;
+  onToggleCollapse: () => void;
+}
+
+function InspectorToggleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden="true">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
 }
 
 function useArtifactText(runId: string | null, artifact: ArtifactInfo | null) {
@@ -211,16 +222,12 @@ function ArtifactBody({ runId, artifact }: { runId: string; artifact: ArtifactIn
   const isReproComparison = artifact.filename === "reproduction_comparison.json";
 
   if (artifact.kind === "chart-dashboard") {
-    return (
-      <div className="flex-1 overflow-auto">
-        <ChartsPanel runId={runId} />
-      </div>
-    );
+    return <ChartsPanel runId={runId} />;
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4">
-      {artifact.kind === "image" && <img src={url} alt={artifact.filename} className="w-full rounded-lg" />}
+    <>
+      {artifact.kind === "image" && <img src={url} alt={artifact.filename} className="w-full block" />}
       {isParquet && <ParquetTable runId={runId} filename={artifact.filename} />}
       {artifact.kind === "binary" && !isParquet && (
         <div className="text-sm text-warm-500">
@@ -236,7 +243,7 @@ function ArtifactBody({ runId, artifact }: { runId: string; artifact: ArtifactIn
       )}
       {text !== undefined && artifact.kind === "markdown" && (
         <div className="prose prose-sm max-w-none">
-          <Markdown>{text}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
         </div>
       )}
       {text !== undefined && artifact.kind === "csv" && <CsvTable text={text} />}
@@ -246,71 +253,79 @@ function ArtifactBody({ runId, artifact }: { runId: string; artifact: ArtifactIn
           {text}
         </pre>
       )}
-    </div>
+    </>
   );
 }
 
-export function ArtifactInspector({ tabs, activeKey, onSelectTab, onCloseTab, width }: ArtifactInspectorProps) {
+export function ArtifactInspector({ tabs, activeKey, onSelectTab, onCloseTab, width, onToggleCollapse }: ArtifactInspectorProps) {
   const activeTab = tabs.find((tab) => tab.key === activeKey) ?? null;
 
-  if (tabs.length === 0) {
-    return (
-      <div
-        className="shrink-0 bg-white h-full flex items-center justify-center text-sm text-warm-400 p-6 text-center"
-        style={{ width }}
-      >
-        点击左侧生成的 artifact 卡片，在这里查看详情
-      </div>
-    );
-  }
-
   return (
-    <div className="shrink-0 bg-white h-full flex flex-col overflow-hidden" style={{ width }}>
-      <div className="flex items-center gap-1 bg-warm-25 border-b border-warm-100 overflow-x-auto shrink-0 p-1.5">
-        {tabs.map((tab) => (
-          <div
-            key={tab.key}
-            onClick={() => onSelectTab(tab.key)}
-            className={`flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-xs rounded-lg cursor-pointer max-w-36 shrink-0 transition-colors ${
-              tab.key === activeKey ? "bg-warm-100 text-warm-900" : "text-warm-500 hover:bg-warm-100/60"
-            }`}
-            title={tabLabel(tab.artifact)}
-          >
-            <FileIcon />
-            <span className="truncate">{tabLabel(tab.artifact)}</span>
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                onCloseTab(tab.key);
-              }}
-              className="text-warm-400 hover:text-warm-700 shrink-0 leading-none w-3.5 text-center"
-              aria-label={`Close ${tabLabel(tab.artifact)}`}
+    <div className="shrink-0 bg-warm-50 h-full flex flex-col overflow-hidden" style={{ width }}>
+      <div className="flex items-center gap-1 bg-warm-50 shrink-0 p-1.5">
+        <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
+          {tabs.map((tab) => (
+            <div
+              key={tab.key}
+              onClick={() => onSelectTab(tab.key)}
+              className={`flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-sm rounded-lg cursor-pointer max-w-36 shrink-0 transition-colors ${
+                tab.key === activeKey ? "bg-warm-100 text-warm-900" : "text-warm-500 hover:bg-warm-100/60"
+              }`}
+              title={tabLabel(tab.artifact)}
             >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
-      {activeTab && (
-        <>
-          <div className="flex items-center justify-between px-3.5 py-2 border-b border-warm-100 shrink-0">
-            <span className="text-xs text-warm-400">{activeTab.artifact.kind}</span>
-            {activeTab.artifact.kind !== "chart-dashboard" && (
-              <a
-                href={artifactUrl(activeTab.runId, activeTab.artifact.filename)}
-                download={activeTab.artifact.filename}
-                className="text-xs text-warm-500 hover:text-warm-800"
-                title="Download"
+              <FileIcon />
+              <span className="truncate">{tabLabel(tab.artifact)}</span>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseTab(tab.key);
+                }}
+                className="text-warm-400 hover:text-warm-700 shrink-0 leading-none w-4 text-center"
+                aria-label={`Close ${tabLabel(tab.artifact)}`}
               >
-                Download
-              </a>
-            )}
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label="收起 Artifact 面板"
+          title="收起 Artifact 面板"
+          className="shrink-0 p-1 rounded-md text-warm-400 hover:bg-warm-100 hover:text-warm-600 transition-colors"
+        >
+          <InspectorToggleIcon className="w-4 h-4" />
+        </button>
+      </div>
+      {activeTab ? (
+        <div className="flex-1 min-h-0 p-3">
+          <div className="h-full flex flex-col rounded-xl border border-warm-150 bg-white overflow-hidden">
+            <div className="shrink-0 flex items-center justify-between px-3.5 py-2 border-b border-warm-100">
+              <span className="text-xs text-warm-400">{activeTab.artifact.kind}</span>
+              {activeTab.artifact.kind !== "chart-dashboard" && (
+                <a
+                  href={artifactUrl(activeTab.runId, activeTab.artifact.filename)}
+                  download={activeTab.artifact.filename}
+                  className="text-xs text-warm-500 hover:text-warm-800"
+                  title="Download"
+                >
+                  Download
+                </a>
+              )}
+            </div>
+            <div className="shrink-0 px-3.5 py-2 text-[11px] leading-4 text-warm-500 border-b border-warm-100 bg-warm-25">
+              Research artifact only. Not investment advice or an automated trading instruction.
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <ArtifactBody runId={activeTab.runId} artifact={activeTab.artifact} />
+            </div>
           </div>
-          <div className="px-3.5 py-2 text-[11px] leading-4 text-warm-500 border-b border-warm-100 bg-warm-25">
-            Research artifact only. Not investment advice or an automated trading instruction.
-          </div>
-          <ArtifactBody runId={activeTab.runId} artifact={activeTab.artifact} />
-        </>
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-sm text-warm-400 p-6 text-center">
+          点击左侧生成的 artifact 卡片，在这里查看详情
+        </div>
       )}
     </div>
   );

@@ -20,6 +20,16 @@ interface SidebarProps {
   onLibraryFiltersChange: (filters: { verdict: string; asset: string; sort: string }) => void;
   isLoading: boolean;
   width: number;
+  onToggleCollapse: () => void;
+}
+
+export function SidebarToggleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden="true">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
 }
 
 function LiteratureSection({
@@ -182,6 +192,7 @@ export function Sidebar({
   onLibraryFiltersChange,
   isLoading,
   width,
+  onToggleCollapse,
 }: SidebarProps) {
   const groups = new Map<string, RunSummary[]>();
   for (const run of runs) {
@@ -193,7 +204,18 @@ export function Sidebar({
   return (
     <div className="shrink-0 bg-warm-25 h-full flex flex-col overflow-hidden" style={{ width }}>
       <div className="px-3 pt-4 pb-3">
-        <div className="font-medium text-warm-900 mb-3 px-1">QuantBench</div>
+        <div className="flex items-center justify-between mb-3 px-1">
+          <div className="font-medium text-warm-900">QuantBench</div>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label="收起侧栏"
+            title="收起侧栏"
+            className="p-1 rounded-md text-warm-400 hover:bg-warm-100 hover:text-warm-600 transition-colors"
+          >
+            <SidebarToggleIcon className="w-4 h-4" />
+          </button>
+        </div>
         <button
           onClick={onNew}
           className="w-full text-left text-sm px-2.5 py-1.5 rounded-md text-warm-700 hover:bg-warm-100 transition-colors flex items-center gap-1.5"

@@ -9,17 +9,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from quantbench.api import run_reader
+from quantbench.api.llm_key import active_model, llm_key_configured, provider_key_env, store_llm_config
 from quantbench.api.run_manager import RunManager
 from quantbench.api.security import allowed_origins, require_api_token
 from quantbench.api.schemas import (
     ArtifactInfo,
     AskPaperRequest,
     AskPaperResponse,
+    ConfigStatus,
     CostEstimateRequest,
     CostEstimateResponse,
     ExperimentRecordSchema,
     ForkRequest,
     IngestPaperRequest,
+    LlmKeyRequest,
     NewSessionResponse,
     NewRunRequest,
     NewRunResponse,
@@ -74,6 +77,21 @@ app.add_middleware(
 
 def _session_store() -> SessionStore:
     return SessionStore(run_reader.RUNS_DIR)
+
+
+@app.get("/api/config/status", response_model=ConfigStatus)
+def get_config_status() -> ConfigStatus:
+    model = active_model()
+    return ConfigStatus(llm_key_configured=llm_key_configured(), model=model, key_env=provider_key_env(model))
+
+
+@app.post("/api/config/llm-key", response_model=StatusResponse)
+def post_llm_key(body: LlmKeyRequest) -> StatusResponse:
+    try:
+        store_llm_config(body.model, body.api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StatusResponse(status="ok")
 
 
 @app.get("/api/library", response_model=list[ExperimentRecordSchema])
