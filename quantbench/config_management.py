@@ -10,7 +10,9 @@ from quantbench.settings import is_server_enabled, is_skill_enabled, set_server_
 from quantbench.skilldocs.doc import parse_skill_md
 from quantbench.skilldocs.registry import SkillRegistryDocs
 from quantbench.skills.mcp_adapter import (
+    MCPClientManager,
     MCPServerConfig,
+    authorization_required_hint,
     load_merged_mcp_config,
     mcp_server_to_config_dict,
     parse_mcp_server_config,
@@ -72,6 +74,36 @@ def remove_mcp_server(name: str, *, scope: str = "user") -> bool:
 
 def set_mcp_server_enabled(name: str, enabled: bool, *, scope: str = "user") -> None:
     set_server_enabled(name, enabled, scope=scope)
+
+
+def probe_mcp_server(name: str, *, timeout_s: float = 5.0) -> dict[str, Any]:
+    """Connect to a configured MCP server once and report its status.
+
+    Shared by the `/api/config/mcp-servers/{name}/test` endpoint and the `quantbench mcp test` CLI so
+    both surface the same states: `ok` (with discovered tools), `needs-authorization` (remote auth
+    challenge), `error`, or `not-found`.
+    """
+
+    server = next((item for item in load_merged_mcp_config(include_disabled=True) if item.name == name), None)
+    if server is None:
+        return {"status": "not-found", "tools": [], "error": "server not found"}
+    if server.allow_write:
+        return {"status": "error", "tools": [], "error": "allowWrite=true is not supported yet"}
+
+    from quantbench.agent.run_context import _RunContext
+
+    manager = MCPClientManager([server], _RunContext(), call_timeout_s=timeout_s)
+    try:
+        connection, error = manager.connect_or_error(server)
+        if error is not None:
+            hint = authorization_required_hint(error)
+            if hint is not None:
+                return {"status": "needs-authorization", "tools": [], "error": hint}
+            return {"status": "error", "tools": [], "error": error}
+        tools = [str(getattr(tool, "name", "")) for tool in connection.tools]
+        return {"status": "ok", "tools": tools, "error": None}
+    finally:
+        manager.close()
 
 
 def list_skill_records(*, include_disabled: bool = True) -> list[dict[str, Any]]:

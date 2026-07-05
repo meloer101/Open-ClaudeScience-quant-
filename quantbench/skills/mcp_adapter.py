@@ -44,6 +44,41 @@ class _ServerConnection:
     stack: AsyncExitStack
 
 
+# Substrings that mark a remote MCP connection failure as "not authenticated" rather than
+# a generic transport/config error. Remote (sse/http) servers commonly answer an unauthenticated
+# connect with HTTP 401/403 or a WWW-Authenticate/OAuth challenge; we surface those as a distinct
+# `needs-authorization` state so the UI/CLI can tell the user to authorize instead of showing a
+# generic "connection failed". QuantBench does not yet drive the OAuth authorization-code flow.
+AUTHORIZATION_ERROR_TOKENS = (
+    "401",
+    "403",
+    "unauthorized",
+    "forbidden",
+    "www-authenticate",
+    "authorization required",
+    "authorization_required",
+    "invalid_token",
+    "oauth",
+)
+
+
+def authorization_required_hint(error: BaseException | str) -> str | None:
+    """Return a human-readable hint when a connection error looks like a missing-auth challenge.
+
+    Returns None for errors that are not recognizably authorization failures, so callers can fall
+    back to reporting the raw error.
+    """
+
+    text = str(error).lower()
+    if not any(token in text for token in AUTHORIZATION_ERROR_TOKENS):
+        return None
+    return (
+        "This remote MCP server requires authorization. Provide credentials (for example an auth "
+        "token via env/headers) or complete the server's OAuth flow. QuantBench does not yet run "
+        "the OAuth authorization-code flow automatically."
+    )
+
+
 SIDE_EFFECT_TOKENS = (
     "create",
     "delete",
@@ -227,16 +262,28 @@ class MCPClientManager:
         self._loop.close()
 
     def _connect(self, server: MCPServerConfig) -> _ServerConnection | None:
+        connection, error = self.connect_or_error(server)
+        if error is not None:
+            warnings.warn(f"Skipping MCP server {server.name}: {error}", stacklevel=2)
+            return None
+        return connection
+
+    def connect_or_error(self, server: MCPServerConfig) -> tuple[_ServerConnection | None, str | None]:
+        """Connect once and return either the connection or a structured error string.
+
+        Unlike `_connect`, this does not swallow the failure into a warning, so one-shot diagnostics
+        (the config `test` endpoint / CLI) can classify the error (e.g. `needs-authorization`).
+        """
+
         if server.name in self._connections:
-            return self._connections[server.name]
+            return self._connections[server.name], None
         try:
             future = asyncio.run_coroutine_threadsafe(self._connect_async(server), self._loop)
             connection = future.result(timeout=self.call_timeout_s)
-        except Exception as exc:
-            warnings.warn(f"Skipping MCP server {server.name}: {type(exc).__name__}: {exc}", stacklevel=2)
-            return None
+        except Exception as exc:  # noqa: BLE001 - external server errors become diagnostics
+            return None, f"{type(exc).__name__}: {exc}"
         self._connections[server.name] = connection
-        return connection
+        return connection, None
 
     async def _connect_async(self, server: MCPServerConfig) -> _ServerConnection:
         from mcp import ClientSession, StdioServerParameters

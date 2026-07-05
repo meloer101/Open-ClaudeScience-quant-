@@ -15,6 +15,83 @@ def test_devserver_plan_binds_localhost_and_sets_tokens():
     assert plan.env["VITE_QUANTBENCH_API_TOKEN"] == "token"
 
 
+class _FakeProc:
+    def wait(self, timeout=None):
+        return 0
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+
+def test_missing_tools_flags_absent_binaries(monkeypatch):
+    from quantbench import devserver
+
+    present = {"uv", "npm"}
+    monkeypatch.setattr(devserver.shutil, "which", lambda name: "/usr/bin/x" if name in present else None)
+
+    assert devserver.missing_tools() == ["node"]
+
+
+def test_run_devserver_aborts_with_readable_hint_when_tool_missing(tmp_path, monkeypatch, capsys):
+    from quantbench import devserver
+
+    monkeypatch.setattr(devserver, "missing_tools", lambda tools=None: ["npm"])
+    started: list = []
+    monkeypatch.setattr(devserver.subprocess, "Popen", lambda *a, **k: started.append(a))
+
+    code = devserver.run_devserver(devserver.build_devserver_plan(token="t"), cwd=tmp_path)
+
+    assert code == 1
+    assert started == []  # bail out before spawning anything
+    out = capsys.readouterr().out
+    assert "npm" in out and "nodejs.org" in out
+
+
+def test_run_devserver_auto_installs_web_deps_on_first_run(tmp_path, monkeypatch):
+    from quantbench import devserver
+
+    web_dir = tmp_path / "web"
+    web_dir.mkdir()
+    monkeypatch.setattr(devserver, "missing_tools", lambda tools=None: [])
+
+    installs: list = []
+
+    def fake_install(wd, env=None):
+        (wd / "node_modules").mkdir()  # simulate a successful install
+        installs.append(wd)
+        return 0
+
+    monkeypatch.setattr(devserver, "install_web_deps", fake_install)
+    started: list = []
+    monkeypatch.setattr(devserver.subprocess, "Popen", lambda *a, **k: (started.append(a), _FakeProc())[1])
+
+    code = devserver.run_devserver(devserver.build_devserver_plan(token="t"), cwd=tmp_path)
+
+    assert installs == [web_dir]
+    assert len(started) == 2  # api + web both spawned after install
+    assert code == 0
+
+
+def test_run_devserver_skips_install_when_deps_present(tmp_path, monkeypatch):
+    from quantbench import devserver
+
+    (tmp_path / "web" / "node_modules").mkdir(parents=True)
+    monkeypatch.setattr(devserver, "missing_tools", lambda tools=None: [])
+
+    def _fail_install(*_a, **_k):
+        raise AssertionError("install_web_deps should not run when node_modules exists")
+
+    monkeypatch.setattr(devserver, "install_web_deps", _fail_install)
+    monkeypatch.setattr(devserver.subprocess, "Popen", lambda *a, **k: _FakeProc())
+
+    code = devserver.run_devserver(devserver.build_devserver_plan(token="t"), cwd=tmp_path)
+
+    assert code == 0
+
+
 def test_seed_example_runs_writes_browsable_artifacts(tmp_path):
     from quantbench.examples import EXAMPLE_RUN_ID, seed_example_runs
 

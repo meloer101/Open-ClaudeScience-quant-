@@ -302,7 +302,13 @@ function McpRow({ server, onChanged }: { server: McpServerRecord; onChanged: () 
             onClick={async () => {
               setTestResult("Testing...");
               const result = await testMcpServer(server.name);
-              setTestResult(result.status === "ok" ? `Tools: ${result.tools.join(", ") || "none"}` : result.error || "Failed");
+              if (result.status === "ok") {
+                setTestResult(`Tools: ${result.tools.join(", ") || "none"}`);
+              } else if (result.status === "needs-authorization") {
+                setTestResult(`Needs authorization: ${result.error || "authorize this server"}`);
+              } else {
+                setTestResult(result.error || "Failed");
+              }
             }}
             className="rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
           >

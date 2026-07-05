@@ -154,6 +154,18 @@ def test_is_readonly_tool_rejects_obvious_side_effects():
     assert not is_readonly_tool(SimpleNamespace(name="prices", description="Execute an order"))
 
 
+def test_authorization_required_hint_detects_auth_challenges():
+    from quantbench.skills.mcp_adapter import authorization_required_hint
+
+    assert authorization_required_hint("HTTPStatusError: 401 Unauthorized") is not None
+    assert authorization_required_hint("Server responded 403 Forbidden") is not None
+    assert authorization_required_hint("WWW-Authenticate: Bearer") is not None
+    assert authorization_required_hint("oauth token required") is not None
+    # Non-auth failures fall through to the raw error.
+    assert authorization_required_hint("TimeoutError: timed out after 5s") is None
+    assert authorization_required_hint("ConnectionRefusedError: [Errno 61]") is None
+
+
 def test_mcp_manager_builds_registry_skill_and_records_audit(tmp_path: Path):
     from quantbench.agent.run_context import _RunContext
     from quantbench.skills.mcp_adapter import MCPClientManager, MCPServerConfig, StdioTransportConfig

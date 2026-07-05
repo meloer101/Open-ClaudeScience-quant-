@@ -15,6 +15,7 @@ from quantbench.config_management import (
     import_mcp_servers,
     import_skill_from_path,
     list_mcp_server_records,
+    probe_mcp_server,
     remove_mcp_server,
     save_mcp_server,
     set_mcp_server_enabled,
@@ -593,7 +594,7 @@ def _skill(args: tuple[str, ...]) -> None:
 
 def _mcp(args: tuple[str, ...]) -> None:
     if not args:
-        raise click.UsageError("mcp requires a subcommand: add/import/list/get/remove/enable/disable/migrate")
+        raise click.UsageError("mcp requires a subcommand: add/import/list/get/test/remove/enable/disable/migrate")
     command = args[0]
     rest = args[1:]
     if command == "list":
@@ -615,6 +616,19 @@ def _mcp(args: tuple[str, ...]) -> None:
             raise click.ClickException(f"MCP server not found: {rest[0]}")
         click.echo(json.dumps(record, ensure_ascii=False, indent=2))
         return
+    if command == "test":
+        if not rest:
+            raise click.UsageError("mcp test requires name")
+        result = probe_mcp_server(rest[0])
+        if result["status"] == "not-found":
+            raise click.ClickException(f"MCP server not found: {rest[0]}")
+        if result["status"] == "ok":
+            click.echo(f"ok: {', '.join(result['tools']) or 'no tools'}")
+            return
+        if result["status"] == "needs-authorization":
+            click.secho(f"needs authorization: {result['error']}", fg="yellow")
+            return
+        raise click.ClickException(result["error"] or "connection failed")
     if command == "add":
         if len(rest) < 2:
             raise click.UsageError("mcp add requires <name> <command> [args...]")

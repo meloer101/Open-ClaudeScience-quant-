@@ -181,6 +181,63 @@ def test_config_mcp_import_is_atomic_on_validation_error(client, tmp_path, monke
     assert not user_mcp.exists()
 
 
+def _redirect_config_paths(tmp_path, monkeypatch):
+    user_mcp = tmp_path / "mcp.json"
+    project_mcp = tmp_path / ".mcp.json"
+    legacy_mcp = tmp_path / "legacy.json"
+    user_settings = tmp_path / "settings.json"
+    project_settings = tmp_path / "project_settings.json"
+    monkeypatch.setattr("quantbench.config_management.USER_MCP_CONFIG", user_mcp)
+    monkeypatch.setattr("quantbench.config_management.PROJECT_MCP_CONFIG", project_mcp)
+    monkeypatch.setattr("quantbench.skills.mcp_adapter.USER_MCP_CONFIG", user_mcp)
+    monkeypatch.setattr("quantbench.skills.mcp_adapter.PROJECT_MCP_CONFIG", project_mcp)
+    monkeypatch.setattr("quantbench.skills.mcp_adapter.MCP_SERVERS_CONFIG", legacy_mcp)
+    monkeypatch.setattr("quantbench.settings.USER_SETTINGS_FILE", user_settings)
+    monkeypatch.setattr("quantbench.settings.PROJECT_SETTINGS_FILE", project_settings)
+    monkeypatch.setattr("quantbench.settings.SETTINGS_FILES", [user_settings, project_settings])
+
+
+def test_config_mcp_delete_removes_server_and_404s_when_missing(client, tmp_path, monkeypatch):
+    _redirect_config_paths(tmp_path, monkeypatch)
+
+    client.post("/api/config/mcp-servers", json={"name": "fs", "scope": "user", "command": "python", "args": []})
+    assert {r["name"] for r in client.get("/api/config/mcp-servers").json()} == {"fs"}
+
+    assert client.delete("/api/config/mcp-servers/fs?scope=user").status_code == 200
+    assert client.get("/api/config/mcp-servers").json() == []
+    assert client.delete("/api/config/mcp-servers/fs?scope=user").status_code == 404
+
+
+def test_config_mcp_test_endpoint_404s_for_unknown_server(client, tmp_path, monkeypatch):
+    _redirect_config_paths(tmp_path, monkeypatch)
+
+    assert client.post("/api/config/mcp-servers/ghost/test").status_code == 404
+
+
+def test_config_mcp_test_endpoint_surfaces_needs_authorization(client, tmp_path, monkeypatch):
+    _redirect_config_paths(tmp_path, monkeypatch)
+    client.post(
+        "/api/config/mcp-servers",
+        json={"name": "remote", "scope": "user", "type": "http", "url": "https://mcp.example.com/mcp"},
+    )
+
+    class _FakeManager:
+        def __init__(self, servers, ctx, call_timeout_s=5.0):
+            pass
+
+        def connect_or_error(self, server):
+            return None, "HTTPStatusError: 401 Unauthorized"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("quantbench.config_management.MCPClientManager", _FakeManager)
+
+    body = client.post("/api/config/mcp-servers/remote/test").json()
+    assert body["status"] == "needs-authorization"
+    assert "authoriz" in body["error"].lower()
+
+
 def test_list_runs_returns_summaries(tmp_path, client):
     _write_fake_completed_run(tmp_path)
 

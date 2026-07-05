@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from quantbench.agent.run_context import _RunContext
 from quantbench.api.schemas import (
     EnabledRequest,
     McpServerRecord,
@@ -18,13 +17,13 @@ from quantbench.config_management import (
     import_skill_from_text,
     list_mcp_server_records,
     list_skill_records,
+    probe_mcp_server,
     remove_mcp_server,
     remove_user_skill,
     save_mcp_server,
     set_mcp_server_enabled,
     set_skill_doc_enabled,
 )
-from quantbench.skills.mcp_adapter import MCPClientManager, load_merged_mcp_config
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -77,22 +76,10 @@ def patch_mcp_server(name: str, body: EnabledRequest) -> StatusResponse:
 
 @router.post("/mcp-servers/{name}/test", response_model=McpServerTestResponse)
 def test_mcp_server(name: str) -> McpServerTestResponse:
-    server = next((item for item in load_merged_mcp_config(include_disabled=True) if item.name == name), None)
-    if server is None:
+    result = probe_mcp_server(name)
+    if result["status"] == "not-found":
         raise HTTPException(status_code=404, detail="server not found")
-    if server.allow_write:
-        return McpServerTestResponse(status="error", error="allowWrite=true is not supported yet")
-    manager = MCPClientManager([server], _RunContext(), call_timeout_s=5.0)
-    try:
-        connection = manager._connect(server)  # noqa: SLF001 - route needs one-shot diagnostics from the adapter.
-        if connection is None:
-            return McpServerTestResponse(status="error", error="connection failed")
-        tools = [str(getattr(tool, "name", "")) for tool in connection.tools]
-        return McpServerTestResponse(status="ok", tools=tools)
-    except Exception as exc:  # noqa: BLE001 - external server errors become diagnostics
-        return McpServerTestResponse(status="error", error=f"{type(exc).__name__}: {exc}")
-    finally:
-        manager.close()
+    return McpServerTestResponse(status=result["status"], tools=result["tools"], error=result["error"])
 
 
 @router.get("/skills", response_model=list[SkillRecord])
