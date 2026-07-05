@@ -1,255 +1,249 @@
-# QuantBench
-
 <p align="center">
-  <img src="web/src/assets/hero.png" alt="QuantBench project visual" width="220" />
+  <img src="docs/assets/banner-workflow.png" alt="QuantBench — AI workflow for quantitative research" width="900" />
 </p>
 
-QuantBench 是一个面向量化研究者的 AI 工作台：把一句自然语言策略想法，转换成可执行、可复现、可审计的研究实验。
+<h1 align="center">QuantBench</h1>
 
-它不是自动交易系统，也不是只会聊天的 bot。QuantBench 的目标是把量化研究中最容易丢失的部分固定下来：数据来源、因子代码、回测配置、指标、图表、警告、研究笔记，以及每次实验的 artifact 目录。
+<p align="center">
+  <strong>From idea to audited backtest. One command.</strong>
+</p>
 
-![QuantBench drawdown artifact](docs/assets/drawdown.png)
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &nbsp;·&nbsp;
+  <a href="#features">Features</a> &nbsp;·&nbsp;
+  <a href="#web-workbench">Web Workbench</a> &nbsp;·&nbsp;
+  <a href="#cli-usage">CLI Usage</a> &nbsp;·&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;·&nbsp;
+  <a href="#roadmap">Roadmap</a>
+</p>
 
-## 项目定位
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+" />
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-green" alt="License: AGPL-3.0" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform: macOS | Linux" />
+  <img src="https://img.shields.io/badge/version-0.2.0-orange" alt="Version 0.2.0" />
+</p>
 
-QuantBench 对标的是 AI research workbench，而不是传统 notebook。用户提出一个研究问题后，系统会通过 Coordinator Agent 调用量化研究技能，完成数据拉取、因子计算、回测、质量检查、图表生成和报告归档。
+---
 
-核心原则：
+QuantBench is a **local-first AI research workbench** for quantitative researchers. Describe a strategy idea in natural language — QuantBench turns it into a reproducible, auditable research run: data sourcing, factor code, backtest, quality checks, charts, and a research note, all saved to a local artifact directory.
 
-- **可复现**：每次 run 都保存代码、参数、指标、图表和 manifest。
-- **可审计**：不只展示结论，也展示数据质量、样本限制和已知偏差。
-- **研究优先**：输出是研究 artifact，不是投资建议或自动下单信号。
-- **本地优先**：默认在研究者本地 Python 环境运行，适合快速迭代和调试。
+It is not an auto-trading system. It is not a chatbot. QuantBench produces **research artifacts** — the kind you can review, reproduce, and hand to a colleague.
 
-## Launch Trust Tiers
+<p align="center">
+  <img src="docs/assets/hero-landing.png" alt="QuantBench landing — from idea to audited backtest" width="850" />
+</p>
 
-首发版本把资产和 universe 可信度显式分层，Reviewer 会在 `launch_trust_policy` finding 中记录 tier：
-
-- `point_in_time_delisted_aware`：point-in-time universe，且 provider 元数据声明覆盖 delisted 成员。
-- `point_in_time_membership_only`：membership 是 PIT，但 delisted 数据覆盖仍需单独审计。
-- `crypto_pit_snapshot_limited`：crypto PIT 来自本地/内置日快照，适合复现形状和流程，不等同完整历史排名数据库。
-- `current_snapshot_survivorship_biased`：当前快照回填历史，必须视为 survivorship-biased research sample。
-
-`factor export` 首发范围仅支持 cross-sectional 因子。单标的导出会返回结构化 unsupported payload，而不是伪造 universe 级目标权重。所有导出都包含 research-only 风险免责声明，不构成投资建议或自动交易指令。
-
-## 已支持能力
-
-- 自然语言触发单标的和截面量化研究。
-- Python 回测引擎，支持向量化单标的回测和 cross-sectional 因子回测。
-- 美股和 crypto universe 构建，支持 S&P 500 当前快照/PIT 成分研究、当前成交量 Top-N USDT 永续合约截面研究，并显式标注 survivorship/snapshot bias。
-- 数据 provider 抽象，当前包含 `yfinance` 美股数据和 CCXT Binance crypto 连接器。
-- 数据缓存、DuckDB warehouse、数据质量检查、数据分片 hash 指纹和 artifact store。
-- Reviewer 审查引擎，自动输出未来函数、样本外衰减、手续费敏感性、funding/borrow 成本敏感性、容量、short-leg 依赖、参数稳定性、Deflated Sharpe、多重检验/PBO、walk-forward、CPCV purge/embargo、截面 IC Newey-West 显著性、regime/tail 依赖、换手率、beta 暴露、截面标的集中度和 PIT universe 覆盖率检查。
-- Experiment Library，支持按 verdict/asset/family/Sharpe 检索历史 run、并排比较指标与 Reviewer finding、查看 parent/child 谱系。
-- Factor Library，可从已跑通且经 Reviewer 审查的 run 保存 `compute(df)` 因子代码、参数、verdict、指标和已知局限，作为后续 run 的可修改起点。
-- Workflow Skills，支持 `skills_docs/*.md` 工作流规范按请求触发注入，或通过 `--skill` 显式注入，并在 manifest 中记录 `injected_skills`。
-- Session fork，从历史 run 继承数据和 universe，只要求模型重写 `compute()`，新 run 会记录 `parent_run_id`。
-- 自动产出 metrics、bootstrap 置信区间、截面 IC 显著性、research note、equity curve、drawdown 等研究产物。
-- 回测现实性配置已显式化：`execution` 会写入 `backtest_result.json`/research note；截面引擎支持 `open_t+1` 执行、close_t vs open_t+1 execution sensitivity、流动性感知 spread/participation-cap 成本、容量曲线、borrow 成本、long/short 贡献分解、显式 `neutralize=[beta,size,sector]` 中性化，以及 raw vs neutralized risk attribution v1 图。
-- FastAPI 后端和 React/Vite 本地 Web 工作台，用于查看 run、artifact、警告、实验库、对比和谱系。
-- 交互式图表面板（equity curve、drawdown、turnover、decile return、cost sensitivity、parameter perturbation、regime decomposition、symbol concentration），零依赖手写 SVG、hover 显示数值；Compare 视图带 Returns Correlation 相关性矩阵；Artifact 浏览器支持 Parquet 文件预览。
-- MCP server 与 Workflow Skill 的自定义管理（对齐 Claude Code 的使用体验）：支持粘贴现成的 `mcpServers` JSON 配置、user/project 双级作用域、逐个启用/禁用并即时热更（无需重启进程），Sidebar 「Customize」面板与 `quantbench mcp` / `quantbench skill` CLI 子命令读写同一份配置。
-
-## 项目结构
-
-```text
-quantbench/
-  agent/        Coordinator、LLM 封装和提示词
-  api/          FastAPI run API、状态管理和 artifact 读取
-  artifact/     每次 research run 的归档存储
-  data/         数据 provider、universe、cache 和 DuckDB warehouse
-  engine/       单标的与截面回测引擎、指标计算
-  factors/      因子库条目、参数提取/覆盖和本地 JSON 存储
-  library/      实验库索引、筛选、对比、聚合、谱系和 fork 配置
-  review/       Reviewer 审查引擎、verdict 和结构化报告
-  skilldocs/    Workflow Skill 文档解析、匹配和 prompt 注入
-  skills/       code execution、plot、report、data quality 等研究技能
-skills_docs/    可按需注入的工作流 Skill Markdown 文档
-web/            React + Vite 本地工作台
-docs/assets/    README 与文档图片资产
-tests/          CLI、API、数据层、回测引擎测试
-```
-
-一次研究运行会落盘到 `runs/<run_id>/`，通常包含：
-
-```text
-config.yaml
-signal.py
-backtest_result.json
-review_report.json
-equity_curve.png
-drawdown.png
-research_note.md
-manifest.json
-```
-
-## Local API Safety
-
-QuantBench is a local single-user research tool. Start the API with `QUANTBENCH_API_TOKEN` set, keep it bound to localhost, and do not expose the port to a network. The web client sends `X-QuantBench-Token`; cross-origin browser access is restricted to configured localhost origins.
-
-The default execution convention is `open_t+1`. `close_t` remains available only as an explicitly optimistic diagnostic assumption and is flagged by Reviewer.
-
-## 快速开始
-
-### 支持平台
-
-首发构建支持 macOS 和 Linux，要求 Python 3.11+。Windows/WSL 以外的原生 Windows 环境尚未纳入首发验证范围。
-
-QuantBench 的运行时状态默认写入 `~/.quantbench/`：
-
-```text
-~/.quantbench/
-  data_cache/
-  runs/
-  factors/
-  literature/
-  api_token
-```
-
-如需把状态目录放到别处，设置 `QUANTBENCH_HOME=/path/to/quantbench-home`。
+## Quick Start
 
 ### Prerequisites
 
-- `uv`
-- Node.js 22+
-- A DeepSeek-compatible API key configured for LiteLLM when running new AI requests
+| Tool | Version | Install |
+|------|---------|---------|
+| Python | 3.11+ | [python.org](https://www.python.org/) |
+| uv | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Node.js | 22+ | [nodejs.org](https://nodejs.org/) |
+| LLM API key | — | DeepSeek-compatible key configured for LiteLLM |
 
-安装 Python 依赖：
+### Three commands to your first experiment
 
 ```bash
+# 1. Install dependencies
 uv sync
-```
 
-也可以从 wheel 或可编辑安装后使用控制台命令：
-
-```bash
-uv run quantbench --help
-```
-
-首次打开前先写入一个 deterministic 示例 run：
-
-```bash
+# 2. Seed example research sessions (free, no API key needed)
 uv run python -m quantbench examples seed
-```
 
-一条命令启动本地 API 和 Web 工作台：
-
-```bash
+# 3. Launch the workbench
 uv run python -m quantbench serve
 ```
 
-首次运行时，`serve` 会自动检查 `uv` / `node` / `npm` 是否就绪，并在缺少 `web/node_modules` 时自动执行一次 `npm install`（只发生在第一次，可能需要一分钟）。缺少某个工具时会打印带安装链接的可读提示，而不是让子进程崩溃。
+Open the printed URL. Four pre-generated research sessions are ready to explore — complete with metrics, charts, Reviewer reports, and research notes.
 
-Open the printed Web URL. The command binds the API to `127.0.0.1` and creates a local API token for the Web session.
+> First launch auto-detects `uv`/`node`/`npm`, runs `npm install` if needed (~1 min), and prints actionable hints if anything is missing.
 
-New natural-language runs may call the Coordinator and Critic LLMs. The composer shows a deterministic preflight token/cost estimate before submission; actual usage is recorded in `manifest.json` after completion. Seeded examples are free to inspect.
+## Features
 
-Internal implementation notes live under `docs/dev/`. Release discipline and preflight checks live in `docs/RELEASE.md`; user-facing changes are tracked in `CHANGELOG.md`.
+### Coordinator Agent
 
-运行 CLI：
+Describe what you want to research in natural language. The Coordinator Agent interprets your intent, pulls data, writes factor code, runs the backtest, triggers quality checks, and produces a full research artifact — no boilerplate.
 
 ```bash
-uv run python -m quantbench "在标普500成分股里测试20日动量因子的截面表现，2022-01-01 到 2024-12-31，等权十分位多空组合"
-uv run python -m quantbench "构建 top 30 USDT 永续合约的截面 universe，测试20日动量因子的截面表现，2023-01-01到2024-12-31，等权十分位多空组合"
+uv run python -m quantbench "在标普500成分股里测试20日动量因子的截面表现，2022-01-01到2024-12-31"
 ```
 
-查看实验库和对比：
+### Reviewer Engine
+
+Every run is automatically audited. The Reviewer flags lookahead bias, overfitting, cost sensitivity, survivorship bias, capacity constraints, and 20+ other statistical and structural issues. Results carry a verdict: **STRONG**, **PROMISING**, **WEAK**, or **REJECT**.
+
+### Reproducible Artifacts
+
+Each run saves everything to `runs/<run_id>/`:
+
+```
+config.yaml          # Full experiment configuration
+signal.py            # The exact factor/signal code that ran
+backtest_result.json  # Metrics, bootstrap CIs, execution assumptions
+review_report.json   # Reviewer findings and verdict
+equity_curve.png     # Interactive equity curve chart
+drawdown.png         # Drawdown visualization
+research_note.md     # Auto-generated research summary
+manifest.json        # Provenance: data hashes, LLM usage, skill injections
+```
+
+### Experiment Library & Factor Library
+
+Browse, filter, and compare past runs by verdict, asset class, factor family, or Sharpe. Save validated factors to a reusable library. Fork any run to iterate with different parameters while preserving lineage.
+
+### Backtest Engine
+
+- **Single-asset** and **cross-sectional** factor backtests
+- `open_t+1` default execution (realistic, not optimistic)
+- Liquidity-aware spread/participation-cap costs, borrow costs, funding costs
+- Long/short contribution decomposition, beta/size/sector neutralization
+- Decile portfolios, turnover tracking, parameter perturbation, regime decomposition
+
+### Universe Construction
+
+- **US equities**: S&P 500 current snapshot and point-in-time constituents
+- **Crypto**: Top-N USDT perpetual contracts via CCXT/Binance
+- Explicit survivorship/snapshot bias labeling via trust tiers
+
+### MCP & Workflow Skills
+
+Extend QuantBench with MCP servers and workflow skills — paste a `mcpServers` JSON config, toggle servers on/off, all hot-reloaded without restart. Fully aligned with Claude Code's `claude mcp` experience.
+
+## Web Workbench
+
+A React + Vite local workbench for browsing runs, inspecting artifacts, and launching new research.
+
+<p align="center">
+  <img src="docs/assets/workbench-run-report.png" alt="QuantBench web workbench — run report with metrics and charts" width="850" />
+</p>
+
+<details>
+<summary><strong>More screenshots</strong></summary>
+
+<br>
+
+**Research Artifacts** — every run produces reproducible code, charts, and a research note:
+
+<p align="center">
+  <img src="docs/assets/research-artifacts.png" alt="Research artifacts: code, charts, and research notes" width="850" />
+</p>
+
+**Customize Panel** — manage workflow skills and MCP connectors from the UI:
+
+<p align="center">
+  <img src="docs/assets/customize-skills-mcp.png" alt="Customize panel for skills and MCP servers" width="850" />
+</p>
+
+**Experiment Library** — filter and compare past research runs:
+
+<p align="center">
+  <img src="docs/assets/experiment-library.png" alt="Experiment Library sidebar" width="340" />
+</p>
+
+</details>
+
+### Interactive Charts
+
+Zero-dependency hand-drawn SVG charts with hover tooltips: equity curve, drawdown, turnover, decile returns, cost sensitivity, parameter perturbation, regime decomposition, symbol concentration, and returns correlation matrix.
+
+## CLI Usage
+
+**Run a research experiment:**
+
+```bash
+# Cross-sectional factor backtest on S&P 500
+uv run python -m quantbench "在标普500成分股里测试20日动量因子的截面表现，2022-01-01到2024-12-31，等权十分位多空组合"
+
+# Crypto perpetual cross-sectional research
+uv run python -m quantbench "构建 top 30 USDT 永续合约的截面 universe，测试20日动量因子，2023-01-01到2024-12-31"
+```
+
+**Experiment Library:**
 
 ```bash
 uv run python -m quantbench library list --verdict PROMISING,STRONG --sort sharpe
 uv run python -m quantbench compare run_A run_B
 ```
 
-保存和复用因子：
+**Factor Library:**
 
 ```bash
 uv run python -m quantbench factor save run_A --name momentum_20d
 uv run python -m quantbench factor list --family momentum --min-verdict PROMISING
-uv run python -m quantbench factor show momentum_20d
 uv run python -m quantbench factor use momentum_20d --param lookback=60 --on "在AAPL上测试，2020-2024"
 ```
 
-查看或显式使用 Workflow Skills：
+**Workflow Skills:**
 
 ```bash
 uv run python -m quantbench skill list
-uv run python -m quantbench skill show crypto-cross-sectional-workflow
 uv run python -m quantbench --skill reviewer-weak-triage "我上一个因子被打成 WEAK，帮我看看下一步"
 ```
 
-管理 MCP server 和 Skills（对齐 Claude Code 的 `claude mcp` 体验，可直接粘贴 Claude Desktop/Claude Code 的 `mcpServers` 配置）：
+**MCP Servers:**
 
 ```bash
 uv run python -m quantbench mcp add-json filesystem '{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/data"]}'
-uv run python -m quantbench mcp import path/to/mcpServers.json --scope project
 uv run python -m quantbench mcp list
-uv run python -m quantbench mcp get filesystem
-uv run python -m quantbench mcp disable filesystem
-uv run python -m quantbench mcp remove filesystem
-
-uv run python -m quantbench skill list
-uv run python -m quantbench skill enable reviewer-weak-triage
+uv run python -m quantbench mcp enable fetch
 ```
 
-配置文件位置：`~/.quantbench/mcp.json`（user 级）、`PROJECT_ROOT/.mcp.json`（project 级，project 覆盖 user）；启用/禁用状态单独存放在 `~/.quantbench/settings.json` / `PROJECT_ROOT/.quantbench/settings.json`，不写进可分享的 `.mcp.json`。Web 工作台 Sidebar 的 **Customize** 面板提供同等能力（粘贴 JSON、Add server 表单、Test connection、逐项开关）。
+## Architecture
 
-仓库自带三个免 key 的示例 MCP server（见 [`.mcp.json`](.mcp.json)，均只暴露只读工具）：`fetch`（抓取网页/论文/数据文档）、`sequential-thinking`（结构化推理）、`time`（时区/时间）。它们**默认禁用**（`.quantbench/settings.json` 里列在 `disabledServers`），这样人人 clone 即得、但不会拖慢首次 run。想用哪个就在 Customize 面板打开、或 `quantbench mcp enable <name>`；首次启用时 `uvx`/`npx` 会冷下载一次对应包（需 Node.js 与 `uv`）。
-
-启动 API：
-
-```bash
-uv run uvicorn quantbench.api.server:app --reload --reload-dir quantbench
+```
+quantbench/
+  agent/        Coordinator Agent, LLM wrappers, prompts
+  api/          FastAPI backend, run state management, artifact serving
+  artifact/     Per-run artifact storage
+  data/         Data providers, universe builders, cache, DuckDB warehouse
+  engine/       Single-asset & cross-sectional backtest engines, metrics
+  factors/      Factor library entries, parameter extraction, local JSON store
+  library/      Experiment library index, filtering, comparison, lineage, fork
+  review/       Reviewer engine, verdict logic, structured reports
+  skilldocs/    Workflow skill document parsing, matching, prompt injection
+  skills/       Code execution, plotting, reporting, data quality skills
+skills_docs/    Workflow skill Markdown documents
+web/            React + Vite local workbench
+tests/          CLI, API, data layer, backtest engine tests
 ```
 
-`--reload-dir quantbench` keeps dev reload scoped to source files. Without it,
-Uvicorn watches the whole project tree; generated run artifacts such as
-`runs/<run_id>/signal.py` can trigger a backend reload mid-run and cancel the
-in-flight task.
+**Runtime state** lives in `~/.quantbench/` by default (override with `QUANTBENCH_HOME`):
 
-本地 API 是单用户开发服务。设置 `QUANTBENCH_API_TOKEN` 或使用 `~/.quantbench/api_token` 后，API 会要求请求携带 `X-QuantBench-Token`；SSE 事件流也支持 `?token=` 查询参数，因为浏览器 `EventSource` 不能发送自定义 header。
-
-启动 Web 工作台：
-
-```bash
-cd web
-npm install
-npm run dev
+```
+~/.quantbench/
+  data_cache/   Downloaded market data
+  runs/         Research run artifacts
+  factors/      Saved factor library
+  literature/   Imported papers
+  api_token     Local API authentication
 ```
 
-Web UI 默认连接本地 FastAPI 服务。
+## Local API Security
+
+QuantBench is a **single-user local research tool**. The API binds to `127.0.0.1` with a local token (`QUANTBENCH_API_TOKEN` or `~/.quantbench/api_token`). Do not expose the port to a network. Cross-origin access is restricted to configured localhost origins.
 
 ## Roadmap
 
-### 近期
+**Research quality** — expand point-in-time universe coverage, Reviewer stress tests, and statistical guardrail calibration.
 
-- 打磨 Web 工作台的加载态、失败态和空状态。
-- ~~完成运行进度的实时展示，支持 SSE 或 WebSocket 事件流。~~ 已支持：`useRunEvents` 通过 SSE 订阅运行中的 run，见 [useRunEvents.ts](web/src/hooks/useRunEvents.ts)。
-- 前端测试框架已引入（Vitest + Testing Library），覆盖了坐标换算、Heatmap 聚合等纯函数和关键组件。
-- API/UI 端到端测试已引入（Playwright，`web/e2e/`）：驱动真实的 FastAPI 后端和 Vite 前端，覆盖 run 列表浏览、run 详情、warnings/summary 展示、artifact 打开等关键路径；测试数据通过 `global-setup`/`global-teardown` 播种/清理到 `runs/` 目录，不污染真实历史记录。
+**Data & execution** — more asset classes (futures, macro, alternative data), dataset versioning, optional sandboxed code execution, exportable experiment bundles.
 
-### 研究质量
+**Product** — tag governance, per-symbol Factor IC Heatmap, multi-factor risk attribution, multi-session research workflows.
 
-- 扩展 point-in-time universe 到 crypto 历史快照、退市数据源覆盖和完整自动重跑。
-- 扩展 Reviewer 的 stress test、benchmark 覆盖范围和统计护栏校准集。
-- 扩展数据质量检查，覆盖公司行为、退市、拆股、缺失交易日和异常跳变。
+See [CHANGELOG.md](CHANGELOG.md) for recent releases.
 
-### 数据与执行
+## Disclaimer
 
-- 增强 dataset versioning 和 cache provenance。
-- 接入更多资产类别：crypto 截面已支持；futures、macro 和 alternative data 仍待独立设计与接入。
-- 为用户自定义研究代码提供可选沙箱执行环境。
-- 支持可导出的 experiment bundle，方便分享和复现实验。
-
-### 产品方向
-
-- 扩展 experiment library 的标签治理和批量操作。
-- 按标的展开的 Factor IC Heatmap 和多因子 Risk Attribution 完整收益归因（Phase 12 已提供 raw vs neutralized 代理图；完整版本仍需逐标的 IC 持久化和更完整的因子模型数据源）。
-- 支持多 session 研究工作流，方便比较策略分支和研究路径。
-
-## 风险声明
-
-QuantBench 生成的是研究产物，不是投资建议。任何回测都可能受到 survivorship bias、look-ahead bias、数据质量、交易成本假设、过拟合和市场状态变化影响。所有结果都应该被复核、复现和压力测试后再用于真实决策。
+QuantBench produces **research artifacts, not investment advice**. All backtests are subject to survivorship bias, look-ahead bias, data quality limitations, transaction cost assumptions, overfitting, and regime change. Results must be reviewed, reproduced, and stress-tested before informing real decisions.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+Copyright © 2026 QuantBench contributors.
+
+This project is licensed under the **GNU Affero General Public License v3.0** — you may use, modify, and distribute this software, but any modified version you distribute or deploy as a service must also be released under AGPL-3.0 with full source code.
+
+See [LICENSE](LICENSE) for the full text.
