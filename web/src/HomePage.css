@@ -325,8 +325,7 @@
   backdrop-filter: blur(16px);
 }
 
-.product-preview:hover,
-.product-preview[data-spotlight="true"] {
+.product-preview:hover {
   border-color: rgba(223, 99, 56, 0.32);
   box-shadow: 0 28px 70px rgba(42, 31, 20, 0.14), 0 0 0 5px rgba(223, 99, 56, 0.06);
   transform: translateY(-3px);
@@ -508,8 +507,7 @@
   background: rgba(255, 255, 255, 0.56);
 }
 
-.metric-card:hover,
-.metric-card[data-spotlight="true"] {
+.metric-card:hover {
   border-color: rgba(223, 99, 56, 0.28);
   background: rgba(255, 249, 244, 0.86);
   transform: translateY(-2px);
@@ -936,15 +934,6 @@
   .feature-card:nth-child(3) {
     animation-delay: 140ms;
   }
-
-  .product-preview[data-spotlight="true"] .factor-line,
-  .product-preview[data-spotlight="true"] .market-line {
-    animation: draw-chart-line 760ms ease-out both;
-  }
-
-  .product-preview[data-spotlight="true"] .sparkline polyline {
-    animation: draw-sparkline 620ms ease-out both;
-  }
 }
 
 @keyframes home-rise-in {
@@ -955,24 +944,6 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes draw-chart-line {
-  from {
-    stroke-dashoffset: 760;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes draw-sparkline {
-  from {
-    stroke-dashoffset: 120;
-  }
-  to {
-    stroke-dashoffset: 0;
   }
 }
 

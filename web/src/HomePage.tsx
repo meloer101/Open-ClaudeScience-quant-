@@ -1,6 +1,8 @@
 import { useState } from "react";
 import "./HomePage.css";
 
+const GITHUB_REPO_URL = "https://github.com/meloer101/ClaudeScience-quant";
+
 type Lang = "en" | "zh";
 
 const factorIdeas = [
@@ -28,7 +30,7 @@ const translations = {
         "Every run ships with metrics, charts, and a research note",
       ],
       primaryCta: "Open the workbench",
-      secondaryCta: "See how it works",
+      secondaryCta: "View on GitHub",
       badge: "Local-first · macOS & Linux · Python 3.11+",
     },
     preview: {
@@ -114,7 +116,7 @@ const translations = {
         "每次运行都会产出指标、图表与研究笔记",
       ],
       primaryCta: "打开工作台",
-      secondaryCta: "查看工作原理",
+      secondaryCta: "在 GitHub 上查看",
       badge: "本地优先 · macOS 与 Linux · Python 3.11+",
     },
     preview: {
@@ -229,16 +231,14 @@ function EquityChart() {
 }
 
 function ProductPreview({
-  spotlight,
   t,
   metricLabels,
 }: {
-  spotlight: boolean;
   t: PreviewCopy;
   metricLabels: readonly string[];
 }) {
   return (
-    <div className="product-preview" aria-label="Backtest workspace preview" data-spotlight={spotlight ? "true" : undefined}>
+    <div className="product-preview" aria-label="Backtest workspace preview">
       <div className="preview-topbar">
         <div>
           <span className="preview-dot" /> Cross-Sectional Value Factor <span className="draft-pill">{t.draft}</span>
@@ -274,7 +274,7 @@ function ProductPreview({
           </div>
           <div className="metric-grid">
             {metricLabels.map((label, index) => (
-              <div className="metric-card" data-spotlight={spotlight ? "true" : undefined} key={label}>
+              <div className="metric-card" key={label}>
                 <small>{label}</small>
                 <strong>{metricValues[index]}</strong>
               </div>
@@ -320,7 +320,6 @@ function FeatureIcon({ type }: { type: "network" | "backtest" | "notes" }) {
 }
 
 export function HomePage() {
-  const [spotlightPreview, setSpotlightPreview] = useState(false);
   const [lang, setLang] = useState<Lang>("en");
   const t = translations[lang];
 
@@ -373,20 +372,15 @@ export function HomePage() {
               <a className="button button-dark" href="/app">
                 {t.hero.primaryCta}
               </a>
-              <button
-                className="button button-light"
-                type="button"
-                aria-pressed={spotlightPreview}
-                onClick={() => setSpotlightPreview((current) => !current)}
-              >
-                <span aria-hidden="true">▷</span> {t.hero.secondaryCta}
-              </button>
+              <a className="button button-light" href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">
+                <span aria-hidden="true">★</span> {t.hero.secondaryCta}
+              </a>
             </div>
             <div className="trusted">
               <span>{t.hero.badge}</span>
             </div>
           </div>
-          <ProductPreview spotlight={spotlightPreview} t={t.preview} metricLabels={t.metricLabels} />
+          <ProductPreview t={t.preview} metricLabels={t.metricLabels} />
         </section>
 
         <section className="feature-grid" aria-label="Platform features">
